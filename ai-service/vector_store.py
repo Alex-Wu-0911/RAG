@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from psycopg.rows import dict_row
+
 from database import get_connection
 
 
@@ -33,3 +35,25 @@ def save_document_chunks(
         )
         # 分块替换和 READY 状态一起提交，失败则一起回滚。
     return len(chunks)
+
+
+def search_chunks(
+    knowledge_base_id: UUID, query_vector: list[float], top_k: int = 3
+) -> list[dict]:
+    """在指定知识库的 READY 文档中，按余弦距离查找最相关的文本块。"""
+    vector = str(query_vector)
+    with get_connection() as connection:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                """
+                SELECT c.document_id, d.filename, c.chunk_index, c.content,
+                       1 - (c.embedding <=> %s::public.vector) AS similarity
+                FROM biz.document_chunks c
+                JOIN biz.documents d ON d.id = c.document_id
+                WHERE c.knowledge_base_id = %s AND d.status = 'READY'
+                ORDER BY c.embedding <=> %s::public.vector, c.id
+                LIMIT %s
+                """,
+                (vector, knowledge_base_id, vector, top_k),
+            )
+            return cursor.fetchall()

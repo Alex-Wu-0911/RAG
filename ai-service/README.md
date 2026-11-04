@@ -316,3 +316,26 @@ vector_store.py 中的 save_document_chunks(document_id, knowledge_base_id, chun
 Java 的上传接口仍只保存文件和元数据，尚未自动调用此 Python 接口。/chat 仍是学习用回显；入库不等于已经实现检索或回答。
 
 本步已通过真实数据库、MinIO 和 Embedding API 验证：首次处理 READY、重复处理不累积旧分块、向量维度为 1536、空白文档失败后保留旧分块、不存在的文档返回 404。临时验证数据及对象已清理。
+
+## 第九步：相似度检索
+
+接口：POST /knowledge-bases/{knowledge_base_id}/search。在 /docs 填入知识库 ID，并提交：
+
+```json
+{
+  "question": "JVM 有哪些内存区域？",
+  "top_k": 3
+}
+```
+
+main.py 中 search_knowledge_base 调用同一个 Embedding 模型，把问题转成向量；vector_store.py 中 search_chunks 查询该知识库下 READY 文档的文本块。top_k 默认 3，可取 1 到 20，实际结果数量可能更少。
+
+响应的 items 包含 document_id、filename、chunk_index、content 和 similarity，按相关程度从高到低返回。
+
+SQL 中 <=> 是余弦距离运算符，越小越相近；similarity = 1 - 余弦距离，越大越相似。它不是百分比或正确率，不保证最高分文本一定能回答问题。当前没有设置相似度阈值，也没有添加向量近似索引，使用精确检索。
+
+不存在或没有可检索文本块的知识库返回空 items；PROCESSING、FAILED 和 PENDING 文档不参与检索。每次检索都会真实调用 Embedding API，不调用聊天模型，不生成回答。
+
+重启服务（或使用 --reload 自动重载）后可在 /docs 调用。下一步再把检索到的内容作为上下文交给大模型，完成 RAG 问答。
+
+余弦距离资料：https://github.com/pgvector/pgvector#distances

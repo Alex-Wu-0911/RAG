@@ -9,7 +9,7 @@ from text_processing import split_text
 from embeddings import EMBEDDING_MODEL, embed_texts
 from openai import APIConnectionError, APIStatusError
 from document_repository import find_document, update_document_status
-from vector_store import save_document_chunks
+from vector_store import save_document_chunks, search_chunks
 
 # 类似 Java 请求 DTO：定义字段类型，由框架解析并校验 JSON。
 class ChatRequest(BaseModel):
@@ -182,3 +182,38 @@ def process_document(document_id: UUID) -> DocumentProcessResponse:
     return DocumentProcessResponse(
         document_id=document_id, status="READY", chunk_count=count
     )
+
+
+class SearchRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000, description="需要检索的问题")
+    top_k: int = Field(default=3, ge=1, le=20, description="最多返回的文本块数量")
+
+
+class SearchHit(BaseModel):
+    document_id: UUID
+    filename: str
+    chunk_index: int
+    content: str
+    similarity: float
+
+
+class SearchResponse(BaseModel):
+    knowledge_base_id: UUID
+    items: list[SearchHit]
+
+
+@app.post("/knowledge-bases/{knowledge_base_id}/search", summary="根据问题检索知识库中最相关的文本块")
+def search_knowledge_base(knowledge_base_id: UUID, request: SearchRequest) -> SearchResponse:
+    """真实调用 Embedding，再按余弦相似度返回最多 top_k 个片段，不生成回答。"""
+    try:
+        query_vector = embed_texts([request.question])[0]
+    except APIStatusError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Embedding API 返回 {error.status_code}，请检查 Key、额度与模型权限",
+        ) from error
+    except APIConnectionError as error:
+        raise HTTPException(status_code=502, detail="无法连接 Embedding API") from error
+
+    items = search_chunks(knowledge_base_id, query_vector, request.top_k)
+    return SearchResponse(knowledge_base_id=knowledge_base_id, items=items)
