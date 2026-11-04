@@ -65,6 +65,7 @@ public class KnowledgeBase {
     }
 
     @PreUpdate
+    @SuppressWarnings("unused")
     private void onUpdate() {
         this.updatedAt = Instant.now();
     }

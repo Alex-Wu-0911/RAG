@@ -61,7 +61,7 @@ IDEA 中设置 Active profiles 为 db，Environment variables 填写上述变量
 mvn test
 ```
 
-默认执行 9 项错误处理测试。显式提供 DB_URL、DB_USER、DB_PASSWORD 后，另执行 7 项 PostgreSQL Repository/Service/Controller 测试，总计 16 项。
+默认执行 9 项错误处理测试。显式提供 DB_URL、DB_USER、DB_PASSWORD 后，另执行 10 项 PostgreSQL Repository/Service/Controller 测试，总计 19 项。
 
 数据库测试中的知识库数据自动回滚，但 Flyway 迁移会实际生效，请连接本地或专用测试数据库。
 
@@ -94,7 +94,7 @@ Controller 测试通过真实 Service 和 PostgreSQL 验证创建、列表、详
 
 ## 文档阶段：V4 元数据表
 
-V4__create_documents.sql 已创建 biz.documents。本步尚未添加 Document 实体、文件存储或上传接口。
+V4__create_documents.sql 已创建 biz.documents。现已有 Document 实体、DocumentStatus 和 DocumentRepository；文件存储和上传接口尚未实现。
 
 字段：id、knowledge_base_id、filename、storage_key、size_bytes、content_hash、status、created_at、updated_at。
 
@@ -107,3 +107,16 @@ V4__create_documents.sql 已创建 biz.documents。本步尚未添加 Document �
 - updated_at 的数据库默认值只在插入时生效，后续由应用维护。
 
 已验证 V4 执行成功、9 个字段及外键与去重约束存在。后续结构修改继续新增迁移。
+
+## 文档阶段：实体与 Repository
+
+- Document 映射 V4 的 9 个字段，构造时状态为 PENDING。
+- DocumentStatus 使用 @Enumerated(EnumType.STRING) 持久化为状态名，不保存枚举序号。
+- changeStatus 修改状态，@PreUpdate 在更新时维护 updatedAt；暂不引入状态机。
+- knowledgeBaseId 直接保存 UUID，不引入 KnowledgeBase 实体关联。
+- findByKnowledgeBaseIdAndContentHash 用于同库内容去重。
+- findByKnowledgeBaseIdOrderByCreatedAtDescIdDesc 用于文档分页列表。
+
+新增 3 项真实 PostgreSQL 测试：元数据保存读取与状态更新、同库查询及跨库重复内容、同库重复内容约束。全部 19 项测试通过，测试数据回滚。
+
+下一步实现本地文件存储、上传 Service 和带简短说明注释的上传接口。
