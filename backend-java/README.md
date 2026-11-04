@@ -36,7 +36,7 @@ IDEA 中设置 Active profiles 为 db，Environment variables 填写上述变量
 - common/web：请求 ID、分页返回结构。
 - document、ingestion、conversation、agent、client：后续实现。
 
-目前没有业务 Controller；Security 依赖、配置和用户身份代码已移除。
+已实现知识库创建、分页列表、详情 Controller；Security 依赖、配置和用户身份代码已移除。
 
 ## 数据库迁移
 
@@ -61,8 +61,49 @@ IDEA 中设置 Active profiles 为 db，Environment variables 填写上述变量
 mvn test
 ```
 
-默认执行 9 项错误处理测试。显式提供 DB_URL、DB_USER、DB_PASSWORD 后，另执行 5 项 PostgreSQL Repository/Service 测试。
+默认执行 9 项错误处理测试。显式提供 DB_URL、DB_USER、DB_PASSWORD 后，另执行 7 项 PostgreSQL Repository/Service/Controller 测试，总计 16 项。
 
 数据库测试中的知识库数据自动回滚，但 Flyway 迁移会实际生效，请连接本地或专用测试数据库。
 
-下一步：请求 DTO 和创建、列表、详情 Controller。
+下一步：文档上传与元数据。
+
+## 知识库接口
+
+启用 db profile 后可用，无需登录。
+
+| 方法 | 地址 | 说明 |
+| --- | --- | --- |
+| POST | /api/knowledge-bases | 接收 name、description，返回 201、Location 和创建结果 |
+| GET | /api/knowledge-bases?page=0&size=20 | 返回 items、page、size、total |
+| GET | /api/knowledge-bases/{id} | 返回详情；不存在返回 404 |
+
+创建请求示例：
+
+```json
+{
+  "name": "研发知识库",
+  "description": "存放部署手册与接口文档"
+}
+```
+
+name 必填，最多 100 字符；description 可省略，最多 1000 字符。@Valid 触发参数校验，错误由 GlobalExceptionHandler 统一转换。
+
+IDEA 请求示例见 requests/knowledge-bases.http：先创建，再把返回 id 填入 knowledgeBaseId 后查询详情。
+
+Controller 测试通过真实 Service 和 PostgreSQL 验证创建、列表、详情与错误响应；测试写入的数据自动回滚。
+
+## 文档阶段：V4 元数据表
+
+V4__create_documents.sql 已创建 biz.documents。本步尚未添加 Document 实体、文件存储或上传接口。
+
+字段：id、knowledge_base_id、filename、storage_key、size_bytes、content_hash、status、created_at、updated_at。
+
+- knowledge_base_id 外键指向知识库；不能上传到不存在的知识库。
+- filename 是展示名，storage_key 是相对存储标识；后续 Java 根据存储根目录定位文件。
+- content_hash 为文件内容 SHA-256；knowledge_base_id + content_hash 唯一，在同一知识库内去重，跨知识库允许相同文件。
+- size_bytes 以字节记录文件大小；非空文件由数据库约束保证，20MB 上限由上传接口配置检查。
+- status 初始 PENDING，处理时 PROCESSING，成功 READY，失败 FAILED。READY 表示后续 Python 已完成处理、可参与检索，不表示仅仅上传成功。
+- 当前表不包含文档正文、分块、Embedding 或向量；这些由 Python 阶段处理。
+- updated_at 的数据库默认值只在插入时生效，后续由应用维护。
+
+已验证 V4 执行成功、9 个字段及外键与去重约束存在。后续结构修改继续新增迁移。

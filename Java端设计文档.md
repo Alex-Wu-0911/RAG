@@ -72,7 +72,7 @@ Service 默认只读事务，create 使用写事务。分页返回 items、page�
 
 ## 6. 目标 HTTP 接口
 
-以下接口尚待开发，不代表当前已开放。
+知识库 POST 创建、GET 列表、GET 详情及健康检查已实现；其他接口尚待开发。
 
 | 方法 | 路径 | 功能 |
 | --- | --- | --- |
@@ -146,4 +146,4 @@ ErrorResponse 包含 code、message、requestId、fieldErrors。BusinessExceptio
 
 现有测试包括统一错误处理，以及真实 PostgreSQL 的知识库保存、修改、全量分页、Service 创建和详情查询。数据库测试中的业务数据通过事务回滚；结构迁移实际生效。
 
-下一步按顺序实现：知识库 Controller → 文档上传 → 入库任务 → Python 通信 → 会话问答 → SSE 与 Agent 记录。只增加关键路径需要的测试与配置。
+下一步按顺序实现：文档上传 → 入库任务 → Python 通信 → 会话问答 → SSE 与 Agent 记录。只增加关键路径需要的测试与配置。

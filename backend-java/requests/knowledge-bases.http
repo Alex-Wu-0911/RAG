@@ -1,0 +1,25 @@
+@baseUrl = http://localhost:8080
+@knowledgeBaseId = 00000000-0000-0000-0000-000000000000
+
+### 创建知识库：执行后将响应 id 复制到上面的 knowledgeBaseId
+POST {{baseUrl}}/api/knowledge-bases
+Content-Type: application/json
+
+{
+  "name": "研发知识库",
+  "description": "存放部署手册与接口文档"
+}
+
+### 分页列表：page 从 0 开始
+GET {{baseUrl}}/api/knowledge-bases?page=0&size=20
+
+### 详情
+GET {{baseUrl}}/api/knowledge-bases/{{knowledgeBaseId}}
+
+### 参数校验示例：预期 400
+POST {{baseUrl}}/api/knowledge-bases
+Content-Type: application/json
+
+{
+  "name": ""
+}
