@@ -1,6 +1,6 @@
 # RAG AI Service
 
-当前包含健康检查、问题回显、Markdown 读取、分块和真实 Embedding 预览接口。已接对象存储、LangChain 文本分割和 OpenAI Embedding；尚未连接向量数据库或实现生成式问答。
+当前已实现 Markdown 读取、分块、真实 Embedding、pgvector 入库、相似度检索及基础 RAG 问答。/chat 已替换早期的问题回显实现；以下按学习步骤保留演进说明，当前调用方式见第十步。
 
 ## 目录
 
@@ -62,7 +62,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
 ```
 
-健康检查与问题回显均可在 /docs 调用。本阶段学习 FastAPI 基础，不提前实现完整 RAG。
+以下是早期 FastAPI 入门阶段的回显示例；当前 /chat 已升级为第十步的 RAG 问答接口。健康检查仍可在 /docs 调用。
 
 ## 第二步：POST 请求体与 Pydantic
 
@@ -237,7 +237,7 @@ input 是一组片段，response.data 中每项 embedding 是一组浮点数。�
 
 已完成真实端到端验证：2 个片段获得 2 个 1536 维向量，接口返回 200。临时验证对象已清理。
 
-本步只生成向量，没有语义检索和聊天回答；/chat 仍明确标注为学习用的问题回显接口。下一步再将分块与向量存入数据库。
+本步只生成向量，没有语义检索和聊天回答；当时的 /chat 为学习用回显，当前已升级为第十步的 RAG 问答接口。下一步再将分块与向量存入数据库。
 
 ## 第六步：Python 连接 PostgreSQL
 
@@ -313,7 +313,7 @@ vector_store.py 中的 save_document_chunks(document_id, knowledge_base_id, chun
 
 接口会等待处理完成才返回，没有后台任务或队列。重复调用会重新产生 Embedding API 用量，并替换分块。不存在的文档返回 404；空白内容返回 400；当前仅支持 .md，其他扩展名返回 415。处理失败时状态记为 FAILED；替换前的分块在新向量成功入库前仍保留。暂不支持并发处理同一文档，请等待上一次处理完成后再重试。
 
-Java 的上传接口仍只保存文件和元数据，尚未自动调用此 Python 接口。/chat 仍是学习用回显；入库不等于已经实现检索或回答。
+Java 的上传接口仍只保存文件和元数据，尚未自动调用此 Python 接口。/chat 现已在第十步升级为 RAG 问答；文档入库本身只准备了检索数据。
 
 本步已通过真实数据库、MinIO 和 Embedding API 验证：首次处理 READY、重复处理不累积旧分块、向量维度为 1536、空白文档失败后保留旧分块、不存在的文档返回 404。临时验证数据及对象已清理。
 
@@ -339,3 +339,35 @@ SQL 中 <=> 是余弦距离运算符，越小越相近；similarity = 1 - 余弦
 重启服务（或使用 --reload 自动重载）后可在 /docs 调用。下一步再把检索到的内容作为上下文交给大模型，完成 RAG 问答。
 
 余弦距离资料：https://github.com/pgvector/pgvector#distances
+
+
+## 第十步：基础 RAG 问答
+
+/chat 已从回显升级为真实问答。generation.py 中 generate_answer 调用 OpenAI Responses API，CHAT_MODEL 默认 gpt-5.4-mini；Embedding 仍使用 EMBEDDING_MODEL。两个模型复用 .env 中已有的 OPENAI_API_KEY，不需要创建新的 Key。
+
+```dotenv
+CHAT_MODEL=gpt-5.4-mini
+```
+
+在 /docs 调用 POST /chat：
+
+```json
+{
+  "knowledge_base_id": "实际知识库UUID",
+  "question": "JVM 内存区域有哪些？",
+  "top_k": 3
+}
+```
+
+前提：该知识库中已上传并处理文档，状态为 READY。流程是问题 Embedding → pgvector 检索 → 把问题与参考片段交给聊天模型 → 返回 answer 和 sources。
+
+sources 包含 source_id、document_id、filename、chunk_index、content、similarity。source_id 从 1 开始，供回答中的 [1]、[2] 对照。这是传给模型的全部参考片段，不代表每个片段都被回答引用。
+
+生成提示词要求仅依据资料回答、资料不足时说明，并将文档中的指令视为数据。引用和资料充分性仍由模型判断，当前没有额外的自动事实核验或相似度阈值。没有检索结果时，程序直接说明没有可检索文档，不调用聊天模型；这条提示不是模型生成的回答。
+
+接口同步返回，尚未实现多轮历史、流式输出或 Agent 自主调用工具。请求模型失败返回 502，不使用模拟回答。每次有检索结果的问答会产生一次问题 Embedding 和一次聊天生成的 API 用量。
+
+已通过真实 API 和数据库验证：回答文档特有的“17 天”并标注 [1]；对未记录的 GPU 型号说明无法确定；来源编号对应正确；空检索和参数校验正常。临时数据已清理。
+
+官方文档：https://developers.openai.com/api/docs/quickstart
+模型说明：https://developers.openai.com/api/docs/models/gpt-5.4-mini

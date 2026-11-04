@@ -10,11 +10,13 @@ from embeddings import EMBEDDING_MODEL, embed_texts
 from openai import APIConnectionError, APIStatusError
 from document_repository import find_document, update_document_status
 from vector_store import save_document_chunks, search_chunks
+from generation import generate_answer
 
 # 类似 Java 请求 DTO：定义字段类型，由框架解析并校验 JSON。
 class ChatRequest(BaseModel):
     knowledge_base_id: UUID
     question: str = Field(min_length=1, max_length=4000, description="用户问题")
+    top_k: int = Field(default=3, ge=1, le=20, description="检索的参考片段数量")
 
 # 创建 FastAPI 应用，下面通过 @app.get、@app.post 注册接口。
 app = FastAPI(title="RAG AI Service", version="0.1.0")
@@ -24,12 +26,6 @@ app = FastAPI(title="RAG AI Service", version="0.1.0")
 def health() -> dict[str, str]:
     """返回进程健康状态，本步不检查数据库或大模型。"""
     return {"status": "UP"}
-
-
-@app.post("/chat", summary="接收问题并回显，暂不调用模型")
-def chat(request: ChatRequest) -> ChatRequest:
-    """学习请求体：校验 UUID 和问题长度，返回接收到的内容。"""
-    return request
 
 
 class DocumentReadRequest(BaseModel):
@@ -217,3 +213,36 @@ def search_knowledge_base(knowledge_base_id: UUID, request: SearchRequest) -> Se
 
     items = search_chunks(knowledge_base_id, query_vector, request.top_k)
     return SearchResponse(knowledge_base_id=knowledge_base_id, items=items)
+
+
+class ChatSource(SearchHit):
+    source_id: int
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[ChatSource]
+
+
+@app.post("/chat", summary="检索知识库并调用聊天模型生成带来源编号的回答")
+def chat(request: ChatRequest) -> ChatResponse:
+    """先检索再生成；sources 是传给模型的参考片段，编号与回答中的 [1] 等对应。"""
+    try:
+        query_vector = embed_texts([request.question])[0]
+        hits = search_chunks(request.knowledge_base_id, query_vector, request.top_k)
+        sources = [ChatSource(source_id=index, **hit) for index, hit in enumerate(hits, start=1)]
+        if not sources:
+            return ChatResponse(answer="该知识库没有可检索的文档片段，请先上传并处理文档。", sources=[])
+        answer = generate_answer(
+            request.question, [source.model_dump(mode="json") for source in sources]
+        )
+    except APIStatusError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"模型 API 返回 {error.status_code}，请检查 Key、额度与模型权限",
+        ) from error
+    except APIConnectionError as error:
+        raise HTTPException(status_code=502, detail="无法连接模型 API") from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail="聊天模型没有返回完整回答，请重试") from error
+    return ChatResponse(answer=answer, sources=sources)
