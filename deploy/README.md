@@ -33,3 +33,61 @@ POSTGRES_DB、POSTGRES_USER、POSTGRES_PASSWORD 用于空数据卷的首次初�
 采用 PostgreSQL 16 官方镜像。当前用户是镜像初始化的本地开发管理员；后续分离应用账号。pgvector 扩展和向量表留到 Python/RAG 阶段再安排，不假定当前镜像已包含扩展。
 
 下一步才将 Spring Boot 的 db profile 连接到此数据库。Compose 的 .env 不会自动成为 Java 进程的环境变量。
+
+## MinIO 对象存储
+
+Java 后续通过 S3 API 上传原始文件到 MinIO，数据库 storage_key 保存对象 Key。暂不写 Java 本地 storage 文件夹。
+
+### 启动
+
+在 deploy 目录执行：
+
+```powershell
+docker compose up -d minio
+docker compose run --rm minio-init
+docker compose ps
+```
+
+minio-init 是一次性 bucket 初始化工具，成功创建后退出；再次执行不会重复创建 bucket。
+
+### 地址与登录
+
+- S3 API：http://localhost:19000，供电脑上运行的 Java/Python 使用。
+- 控制台：http://localhost:19001，供浏览器登录查看文件。
+- Docker 网络中的服务使用 http://minio:9000，不使用 localhost:19000。
+- 用户名、密码分别为本机 .env 的 MINIO_ROOT_USER、MINIO_ROOT_PASSWORD。
+- bucket 默认为 rag-documents，可理解为存放文档对象的容器。
+- Java 的 MinIO 客户端尚未实现，Compose 环境变量也不会自动进入 Java 进程。
+
+### 持久化
+
+minio_data 命名卷挂载到 /data，容器重建后对象仍保留。数据仍占用本机 Docker 磁盘，由 MinIO 管理，不是云端存储。
+
+不要执行 docker compose down -v，除非明确需要删除 PostgreSQL 和 MinIO 的全部本地数据。
+
+本地开发使用 Silo（PGSTY 维护的 MinIO 社区分支），采用已验证可公开访问的 Docker Hub 版本并固定镜像摘要。保留 minio 服务名、MINIO_* 变量及 S3 接口。初始化工具使用同一镜像内置的 mcli，不再依赖官方 Quay 镜像。原数据库配置与数据卷保留不变。
+
+### 验证
+
+```powershell
+Invoke-WebRequest http://localhost:19000/minio/health/live
+docker compose run --rm --entrypoint /bin/sh minio-init -c 'mcli alias set storage http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mcli ls storage'
+```
+
+健康接口应返回 HTTP 200，对象列表中应出现 rag-documents。也可直接在控制台查看 bucket。
+
+### 镜像拉取 401 的处理
+
+原来的 quay.io/minio/minio 与 quay.io/minio/mc 已无法公开拉取，配置现改用 docker.io/pgsty/silo；不是要求用户登录 Quay。
+
+在项目根目录也可以用下面的命令启动，避免找不到 Compose 文件：
+
+```powershell
+docker compose -f deploy/compose.yaml pull minio minio-init
+docker compose -f deploy/compose.yaml up -d minio
+docker compose -f deploy/compose.yaml run --rm minio-init
+```
+
+在 deploy 目录执行时省略 -f deploy/compose.yaml 即可。凭证、端口、bucket 和数据卷不变，无需删除现有卷。
+
+镜像资料：https://github.com/pgsty/silo
