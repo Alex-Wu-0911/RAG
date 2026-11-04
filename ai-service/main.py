@@ -8,6 +8,8 @@ from storage import read_object
 from text_processing import split_text
 from embeddings import EMBEDDING_MODEL, embed_texts
 from openai import APIConnectionError, APIStatusError
+from document_repository import find_document, update_document_status
+from vector_store import save_document_chunks
 
 # 类似 Java 请求 DTO：定义字段类型，由框架解析并校验 JSON。
 class ChatRequest(BaseModel):
@@ -139,4 +141,44 @@ def preview_embeddings(request: DocumentReadRequest) -> DocumentEmbeddingsRespon
         vector_count=len(vectors),
         dimensions=len(vectors[0]),
         sample_vector=vectors[0][:8],
+    )
+
+
+class DocumentProcessResponse(BaseModel):
+    document_id: UUID
+    status: str
+    chunk_count: int
+
+
+@app.post("/documents/{document_id}/process", summary="处理 Markdown 文档并将文本块与真实向量入库")
+def process_document(document_id: UUID) -> DocumentProcessResponse:
+    """按文档 ID 同步完成读取、分块、Embedding 和入库；重复处理替换旧分块。"""
+    document = find_document(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    update_document_status(document_id, "PROCESSING")
+    try:
+        _, text = load_markdown(document["storage_key"])
+        chunks = split_text(text)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="文档没有可生成向量的文本")
+        vectors = embed_texts(chunks)
+        count = save_document_chunks(
+            document_id, document["knowledge_base_id"], chunks, vectors
+        )
+    except Exception as error:
+        # 失败必须记录状态；仍将原错误交给框架处理，不返回虚假的成功结果。
+        update_document_status(document_id, "FAILED")
+        if isinstance(error, APIStatusError):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Embedding API 返回 {error.status_code}，请检查 Key、额度与模型权限",
+            ) from error
+        if isinstance(error, APIConnectionError):
+            raise HTTPException(status_code=502, detail="无法连接 Embedding API") from error
+        raise
+
+    return DocumentProcessResponse(
+        document_id=document_id, status="READY", chunk_count=count
     )

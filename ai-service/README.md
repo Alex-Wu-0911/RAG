@@ -273,3 +273,46 @@ with 代码块退出后自动关闭连接；正常退出提交事务，出现异
 本次验证：连接 knowledge_agent 成功，pgvector 为 0.8.7；分块表尚未创建。依赖检查通过。
 
 驱动文档：https://www.psycopg.org/psycopg3/docs/basic/usage.html
+
+## 第七步：保存文本块和向量
+
+vector_store.py 中的 save_document_chunks(document_id, knowledge_base_id, chunks, vectors) 负责入库，返回保存数量。两个 ID 对应 documents 表中的真实文档及其所属知识库，chunks 和 vectors 按顺序一一对应。
+
+函数先删除该文档的旧分块，再按从 0 开始的序号批量插入新分块。删除与插入使用同一连接、同一事务：全部成功才提交，失败时回滚，因此插入失败不会丢失旧分块。
+
+关键语法：
+
+- %s 是 SQL 参数占位符，实际值单独传递，不使用字符串拼接 SQL。
+- %s::public.vector 将传入的向量文本转换成数据库向量类型。这里用 str(vector) 把 Python 浮点列表转成如 [0.1, 0.2] 的文本；当前列要求实际包含 1536 个数字。
+- executemany 对多条分块数据执行相同的 INSERT。
+- zip(chunks, vectors, strict=True) 按位置配对文本和向量，数量不一致时报错并回滚。
+
+本步只增加可调用的入库函数，没有新增 HTTP 接口，也不会自动调用 Embedding。下一步再通过处理接口串联读取、分块、真实 Embedding 和入库。
+
+## 第八步：按文档 ID 处理并入库
+
+新增同步接口：POST /documents/{document_id}/process，无请求体。在 /docs 填入通过 Java 上传得到的真实文档 ID 后执行。修改代码后需要重启 Uvicorn；若使用 --reload 则自动重载。
+
+处理顺序：
+
+1. document_repository.find_document 从数据库查询知识库 ID 和 storage_key，不由调用方重复填写。
+2. 状态更新为 PROCESSING，从 MinIO 读取 UTF-8 Markdown。
+3. 默认按 500 字符、50 字符重叠分块，调用真实 Embedding API。
+4. save_document_chunks 替换旧分块，并在同一事务内把文档改为 READY。
+5. 返回 document_id、status 和 chunk_count。
+
+示例响应结构：
+
+```json
+{
+  "document_id": "上传接口返回的文档UUID",
+  "status": "READY",
+  "chunk_count": 3
+}
+```
+
+接口会等待处理完成才返回，没有后台任务或队列。重复调用会重新产生 Embedding API 用量，并替换分块。不存在的文档返回 404；空白内容返回 400；当前仅支持 .md，其他扩展名返回 415。处理失败时状态记为 FAILED；替换前的分块在新向量成功入库前仍保留。暂不支持并发处理同一文档，请等待上一次处理完成后再重试。
+
+Java 的上传接口仍只保存文件和元数据，尚未自动调用此 Python 接口。/chat 仍是学习用回显；入库不等于已经实现检索或回答。
+
+本步已通过真实数据库、MinIO 和 Embedding API 验证：首次处理 READY、重复处理不累积旧分块、向量维度为 1536、空白文档失败后保留旧分块、不存在的文档返回 404。临时验证数据及对象已清理。
