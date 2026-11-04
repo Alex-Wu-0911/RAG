@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.UUID;
 
+@SuppressWarnings("all")
 public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBase, UUID> {
     Page<KnowledgeBase> findAllByOrderByCreatedAtDescIdDesc(Pageable pageable);
 }

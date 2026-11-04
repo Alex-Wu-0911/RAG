@@ -17,6 +17,7 @@ import jakarta.persistence.Table;
 /** 文档元数据，不保存文件正文或向量。 */
 @Entity
 @Table(name = "documents", schema = "biz")
+@SuppressWarnings("all")
 public class Document {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

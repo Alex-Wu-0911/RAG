@@ -3,6 +3,7 @@ package com.example.knowledgeagent.common.error;
 import java.util.List;
 
 /** 所有 MVC 错误使用同一种响应结构，不包含堆栈或参数原值。 */
+@SuppressWarnings("all")
 public record ErrorResponse(
         String code,
         String message,

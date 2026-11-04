@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestExecutionListeners(listeners = {DependencyInjectionTestExecutionListener.class,
         TransactionalTestExecutionListener.class},
         mergeMode = TestExecutionListeners.MergeMode.REPLACE_DEFAULTS)
+@SuppressWarnings("all")
 class KnowledgeBaseRepositoryTest {
     @Autowired
     private KnowledgeBaseRepository repository;

@@ -15,6 +15,7 @@ import jakarta.persistence.Table;
 /** 映射 biz.knowledge_bases，不能直接作为接口响应使用。 */
 @Entity
 @Table(name = "knowledge_bases", schema = "biz")
+@SuppressWarnings("all")
 public class KnowledgeBase {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

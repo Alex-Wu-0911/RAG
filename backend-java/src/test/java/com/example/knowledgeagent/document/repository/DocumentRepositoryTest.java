@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @TestExecutionListeners(listeners = {DependencyInjectionTestExecutionListener.class,
         TransactionalTestExecutionListener.class},
         mergeMode = TestExecutionListeners.MergeMode.REPLACE_DEFAULTS)
+@SuppressWarnings("all")
 class DocumentRepositoryTest {
     @Autowired
     private DocumentRepository documents;

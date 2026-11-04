@@ -21,6 +21,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/knowledge-bases")
 @Profile("db")
+@SuppressWarnings("all")
 public class KnowledgeBaseController {
     private final KnowledgeBaseService service;
 

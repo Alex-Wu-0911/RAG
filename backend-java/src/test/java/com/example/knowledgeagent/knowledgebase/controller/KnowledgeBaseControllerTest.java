@@ -32,6 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestExecutionListeners(listeners = {ServletTestExecutionListener.class,
         DependencyInjectionTestExecutionListener.class, TransactionalTestExecutionListener.class},
         mergeMode = TestExecutionListeners.MergeMode.REPLACE_DEFAULTS)
+@SuppressWarnings("all")
 class KnowledgeBaseControllerTest {
     @Autowired
     private MockMvc mvc;

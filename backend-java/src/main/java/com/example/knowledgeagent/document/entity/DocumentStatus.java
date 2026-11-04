@@ -1,5 +1,6 @@
 package com.example.knowledgeagent.document.entity;
 
+@SuppressWarnings("all")
 public enum DocumentStatus {
     PENDING,     // 已上传，等待处理
     PROCESSING,  // Python 正在处理

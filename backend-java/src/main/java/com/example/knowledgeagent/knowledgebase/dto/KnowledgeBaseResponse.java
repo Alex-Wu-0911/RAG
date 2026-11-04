@@ -5,6 +5,7 @@ import com.example.knowledgeagent.knowledgebase.entity.KnowledgeBase;
 import java.time.Instant;
 import java.util.UUID;
 
+@SuppressWarnings("all")
 public record KnowledgeBaseResponse(UUID id, String name, String description,
                                     Instant createdAt, Instant updatedAt) {
     public static KnowledgeBaseResponse from(KnowledgeBase entity) {

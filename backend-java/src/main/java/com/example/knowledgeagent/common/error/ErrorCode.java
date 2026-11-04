@@ -3,6 +3,7 @@ package com.example.knowledgeagent.common.error;
 import org.springframework.http.HttpStatus;
 
 /** 错误码保持稳定；HTTP 状态表示类别，错误码表示业务原因。 */
+@SuppressWarnings("all")
 public enum ErrorCode {
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "请求格式或参数错误"),
     VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "参数校验失败"),

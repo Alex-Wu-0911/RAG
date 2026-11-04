@@ -18,6 +18,7 @@ import jakarta.servlet.http.HttpServletResponse;
 /** 将同一个请求标识写入请求属性、响应头与日志上下文。 */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
+@SuppressWarnings("all")
 public class RequestIdFilter extends OncePerRequestFilter {
     public static final String HEADER = "X-Request-Id";
     public static final String ATTRIBUTE = RequestIdFilter.class.getName() + ".requestId";

@@ -16,6 +16,7 @@ import java.util.UUID;
 @Service
 @Profile("db")
 @Transactional(readOnly = true)
+@SuppressWarnings("all")
 public class KnowledgeBaseService {
     private final KnowledgeBaseRepository repository;
 
