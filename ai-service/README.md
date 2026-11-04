@@ -1,10 +1,13 @@
 # RAG AI Service
 
-当前包含健康检查和问题回显接口，不接数据库、对象存储、LangChain 或模型。
+当前包含健康检查、问题回显、Markdown 读取和分块预览接口。已接对象存储和 LangChain 文本分割组件；尚未连接数据库、Embedding 或大模型。
 
 ## 目录
 
-- main.py：应用及健康检查接口。
+- main.py：应用、请求/响应模型及接口。
+- storage.py：对象存储 SDK 连接及读取。
+- text_processing.py：LangChain 文本分块函数。
+- .env：本地对象存储配置，已被 Git 忽略。
 - requirements.txt：项目直接依赖。
 - requirements.lock.txt：首次安装后的完整固定版本，便于复现。
 - .venv：本项目的 Python 虚拟环境，不提交 Git。
@@ -51,7 +54,7 @@ IDE 中选择 ai-service/.venv/Scripts/python.exe 作为解释器，避免依赖
 
 ## 重新安装环境
 
-本机已创建 .venv 并安装依赖。换一台电脑时：
+本机已创建 .venv、安装依赖并写入本地对象存储配置。换一台电脑时，先参考 .env.example 创建 .env，再安装：
 
 ```powershell
 python -m venv .venv
@@ -86,3 +89,100 @@ main.py 中 ChatRequest 继承 BaseModel，相当于 Java 的请求 DTO。
 把 UUID 改成 abc，或者把 question 改成空字符串，再执行：FastAPI 返回 422，detail 列出错误字段。这是请求校验，没有调用 Java 的异常处理器。
 
 空格组成的问题目前不会被自动去除；本步只学习类型和长度校验。
+
+## 第三步：从对象存储读取 Markdown
+
+新增 POST /documents/read，接收：
+
+```json
+{
+  "storage_key": "知识库UUID/文件UUID.md"
+}
+```
+
+在 http://localhost:19001 的 rag-documents bucket 中，找到 Java 上传的 Markdown，复制完整对象 Key。若在子目录里，必须包含目录前缀。不要填写原始文件名或带 http 的下载 URL。
+
+然后打开 http://localhost:8000/docs，选择 POST /documents/read → Try it out → Execute。
+
+响应字段：
+
+- storage_key：请求的对象 Key。
+- size_bytes：原文件字节数。
+- text_length：解码后的文本字符数。
+- preview：前 1000 个字符，尚未分块、检索或生成向量。
+
+### 配置
+
+新增 minio、python-dotenv 两项直接依赖。storage.py 显式读取 ai-service/.env；进程中已有的环境变量优先。
+
+- MINIO_ENDPOINT：完整服务地址，例如 http://localhost:19000。
+- MINIO_ACCESS_KEY：deploy/.env 中 MINIO_ROOT_USER 的值。
+- MINIO_SECRET_KEY：deploy/.env 中 MINIO_ROOT_PASSWORD 的值。
+- MINIO_BUCKET：rag-documents。
+
+本机已配置，密码不写入源码。换环境时复制 .env.example 为 .env 并填写实际值。数据库仍保存文档 ID 与 storage_key，本接口暂不查询数据库。
+
+### 阅读顺序
+
+1. main.py 中 DocumentReadRequest：定义接收的 JSON。
+2. @app.post('/documents/read')：声明接口，并用 summary 和函数说明生成文档。
+3. read_object(...)：普通 Python 函数调用，跳到 storage.py 看实现。
+4. client.get_object(...)：SDK 向对象存储发送请求，返回可读取的二进制响应。
+5. response.read()：取得 bytes，finally 中关闭响应并释放 HTTP 连接。
+6. content.decode('utf-8-sig')：将字节转换为文本，并兼容 UTF-8 BOM。
+7. text[:1000]：Python 切片，取前 1000 个字符。
+8. DocumentPreviewResponse：定义响应字段并自动生成响应文档。
+
+此处使用普通 def，因为 SDK 是同步调用；不为了形式改成 async def。
+
+仅接受 UTF-8 Markdown。不存在对象返回 404；扩展名不是 .md 返回 415；不是 UTF-8 文本返回 400。没有把 PDF 当纯文本读取，也没有实现 PDF 解析。
+
+已使用真实对象验证：读取成功、字节数和文本长度、1000 字符预览、UTF-8 BOM、不存在对象与 PDF 拒绝。临时验证对象已清理。
+
+## 第四步：文本分块预览
+
+安装的是 langchain-text-splitters 组件，无需安装完整 LangChain，也不需要 API Key。
+
+在 /docs 调用 POST /documents/chunks：
+
+```json
+{
+  "storage_key": "知识库UUID/文件UUID.md",
+  "chunk_size": 500,
+  "chunk_overlap": 50
+}
+```
+
+后两个参数可省略，使用上面的默认值。chunk_size 为 1～10000，chunk_overlap 必须非负且小于 chunk_size。计数单位是 Python 字符，不是 token 或 UTF-8 字节。
+
+响应含 storage_key、chunk_size、chunk_overlap、total、chunks。每个片段包含：
+
+- index：从 0 开始的片段序号。
+- content：实际片段内容。
+- length：len(content)，单位为字符。
+
+### 核心代码
+
+text_processing.py 中：
+
+```python
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=chunk_size,
+    chunk_overlap=chunk_overlap,
+    length_function=len,
+    separators=["\n\n", "\n", "。", "！", "？", " ", ""],
+)
+return splitter.split_text(text)
+```
+
+它优先尝试段落、换行、中文标点及空格，仍然过长时再按字符切开。chunk_size 是长度上限，不要求每块恰好 500 字符；chunk_overlap 是目标重叠长度，受分隔符边界影响，不保证每两块都刚好重叠 50 字符。
+
+main.py 的 load_markdown 复用已有读取与 UTF-8 解码逻辑，读取预览和分块预览都使用它。分块接口调用 split_text，再通过 enumerate(parts) 为每一块生成序号。
+
+### 动手观察
+
+对同一份较长 Markdown，分别设置 500/50、200/20，比较 total、length 和相邻 content。短于块上限的文档可能只有一个片段，这是正常结果。
+
+已验证真实对象读取后分块、默认与自定义参数、错误重叠参数、空文本处理，并确认原读取接口仍然可用。临时验证对象已清理。
+
+本接口返回全部分块，只用于当前学习预览，不保存分块，不调用模型，不生成或保存向量。下一步才接真实 Embedding 服务，届时再配置所选服务的 API Key。
