@@ -5,3 +5,7 @@ python-dotenv
 langchain-text-splitters
 openai
 psycopg[binary]
+langchain-core
+langchain
+langchain-openai
+langgraph

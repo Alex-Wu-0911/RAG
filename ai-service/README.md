@@ -1,6 +1,6 @@
 # RAG AI Service
 
-当前已实现 Markdown 读取、分块、真实 Embedding、pgvector 入库、相似度检索及基础 RAG 问答。/chat 已替换早期的问题回显实现；以下按学习步骤保留演进说明，当前调用方式见第十步。
+当前已实现 Markdown 读取、分块、真实 Embedding、pgvector 入库、相似度检索、基础 RAG 问答和单轮 Agent 问答。/chat 已替换早期的问题回显实现；以下按学习步骤保留演进说明，当前调用方式见第十步。
 
 ## 目录
 
@@ -371,3 +371,72 @@ sources 包含 source_id、document_id、filename、chunk_index、content、simi
 
 官方文档：https://developers.openai.com/api/docs/quickstart
 模型说明：https://developers.openai.com/api/docs/models/gpt-5.4-mini
+
+## 第十一步：把检索封装成 Agent 工具
+
+agent_tools.py 中 create_search_tool(knowledge_base_id) 返回一个 LangChain 工具，名称是 search_knowledge_base。当前仅使用已安装的 langchain-core，已将它显式列为直接依赖；还没有创建 Agent 或新增 HTTP 接口。
+
+@tool 将函数封装为工具对象：函数名是工具名，docstring 是用途说明，类型注解定义模型可传入的参数。query 是检索问题或关键词，top_k 默认 3，取值范围与已有检索接口一致。
+
+知识库 ID 由外层 create_search_tool 固定，内部函数直接使用它。这种写法称为闭包；模型只看到 query 和 top_k，不需要填写知识库 ID。
+
+手动调用方式（knowledge_base_id 是已有的 UUID 对象）：
+
+```python
+from agent_tools import create_search_tool
+
+search_tool = create_search_tool(knowledge_base_id)
+results = search_tool.invoke({"query": "JVM 内存区域有哪些？", "top_k": 3})
+```
+
+这里是程序直接调用工具，不是模型自主选择工具。invoke 会先解析参数，再执行问题 Embedding 和已有 SQL 检索；调用会产生真实 Embedding API 用量。返回的列表包含文档 ID、文件名、分块序号、原文和相似度，UUID 已转为字符串，便于交给模型。
+
+下一步创建 Agent 并注册此工具，让模型根据问题产生 tool call，再由框架执行 Python 函数。
+
+工具文档：https://docs.langchain.com/oss/python/langchain/tools
+
+
+## 第十二步：由 Agent 自主调用检索工具
+
+新增 agent_service.py，使用 LangChain create_agent，将 ChatOpenAI 和已有的 search_knowledge_base 工具注册在一起。模型仍读取 .env 中的 CHAT_MODEL 和 OPENAI_API_KEY。
+
+核心代码：
+
+```python
+agent = create_agent(
+    model=model,
+    tools=[create_search_tool(knowledge_base_id)],
+    system_prompt=...,
+    middleware=[ToolCallLimitMiddleware(run_limit=3, exit_behavior="error")],
+)
+result = agent.invoke({"messages": [{"role": "user", "content": question}]})
+```
+
+模型产生 tool call 时，LangChain 执行对应 Python 工具，把结果作为 ToolMessage 交回模型，直到模型输出最终回答。提示词要求知识库问题先检索，普通问候可以直接回复；资料不足时可以更换关键词检索。每个请求独立运行，尚未保存多轮历史。
+
+在 /docs 调用 POST /agent/chat：
+
+```json
+{
+  "knowledge_base_id": "实际知识库UUID",
+  "question": "根据知识库，归档文件需要保留多久？"
+}
+```
+
+返回字段：
+
+- answer：Agent 最终回答。
+- tool_calls：实际调用的工具名、模型传入的 args，以及 result_count。普通问候可能为空。这里没有返回模型内部推理。
+- sources：工具实际查到的参考片段，按 source_id 去重。这是全部查到的资料，不代表每个片段都被回答引用。
+
+Agent 的 source_id 使用“文档 UUID:分块序号”，回答中的 [source_id] 对应同一片段，跨多次检索仍可识别来源。原 /chat 的数字编号来源格式保持不变。
+
+每次 Agent 请求最多执行 3 次工具调用；再次请求执行工具会停止并返回 502。另有图执行步数上限，避免持续循环。次数限制只约束单个请求，不是后台任务或服务限流。每次模型判断、生成回答及工具内 Embedding 都会产生实际 API 用量。
+
+对比：/chat 固定检索一次再回答；/agent/chat 让模型选择是否检索及检索关键词，并可继续检索。这一步没有自动把 Java 上传串联到文档处理接口。
+
+依赖已增加 langchain 和 langchain-openai，锁定版本见 requirements.lock.txt。
+
+LangChain 文档：https://docs.langchain.com/oss/python/langchain/agents
+
+本步已通过真实模型和数据库验证：知识库问题自主调用检索工具并引用真实片段；普通问候没有调用工具；空检索明确说明没有资料；参数校验正常。临时验证数据已清理。

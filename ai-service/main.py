@@ -11,6 +11,9 @@ from openai import APIConnectionError, APIStatusError
 from document_repository import find_document, update_document_status
 from vector_store import save_document_chunks, search_chunks
 from generation import generate_answer
+from agent_service import run_agent
+from langchain.agents.middleware.tool_call_limit import ToolCallLimitExceededError
+from langgraph.errors import GraphRecursionError
 
 # 类似 Java 请求 DTO：定义字段类型，由框架解析并校验 JSON。
 class ChatRequest(BaseModel):
@@ -246,3 +249,43 @@ def chat(request: ChatRequest) -> ChatResponse:
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail="聊天模型没有返回完整回答，请重试") from error
     return ChatResponse(answer=answer, sources=sources)
+
+
+class AgentChatRequest(BaseModel):
+    knowledge_base_id: UUID
+    question: str = Field(min_length=1, max_length=4000, description="交给 Agent 的问题")
+
+
+class AgentSource(SearchHit):
+    source_id: str
+
+
+class AgentToolCall(BaseModel):
+    name: str
+    args: dict
+    result_count: int
+
+
+class AgentChatResponse(BaseModel):
+    answer: str
+    tool_calls: list[AgentToolCall]
+    sources: list[AgentSource]
+
+
+@app.post("/agent/chat", summary="由 Agent 自主调用检索工具并回答，返回实际工具调用记录")
+def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
+    """单轮 Agent 问答，最多检索 3 次；工具调用记录可用于观察模型的选择。"""
+    try:
+        result = run_agent(request.knowledge_base_id, request.question)
+    except (ToolCallLimitExceededError, GraphRecursionError) as error:
+        raise HTTPException(status_code=502, detail="Agent 达到执行次数上限，请缩小问题范围后重试") from error
+    except APIStatusError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"模型 API 返回 {error.status_code}，请检查 Key、额度与模型权限",
+        ) from error
+    except APIConnectionError as error:
+        raise HTTPException(status_code=502, detail="无法连接模型 API") from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail="Agent 没有生成完整回答，请重试") from error
+    return AgentChatResponse(**result)
