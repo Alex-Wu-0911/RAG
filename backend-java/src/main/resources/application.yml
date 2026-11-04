@@ -1,0 +1,27 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: knowledge-agent-backend
+  profiles:
+    default: local
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+# Reserved configuration for the future Python service client.
+ai-service:
+  base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+  connect-timeout: 3s
+  read-timeout: 60s

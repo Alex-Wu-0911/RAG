@@ -1,0 +1,13 @@
+# Activate with --spring.profiles.active=db after creating the database.
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/knowledge_agent}
+    username: ${DB_USER:rag}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
