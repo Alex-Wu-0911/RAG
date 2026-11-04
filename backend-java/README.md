@@ -94,12 +94,12 @@ Controller 测试通过真实 Service 和 PostgreSQL 验证创建、列表、详
 
 ## 文档阶段：V4 元数据表
 
-V4__create_documents.sql 已创建 biz.documents。现已有 Document 实体、DocumentStatus 和 DocumentRepository；文件存储和上传接口尚未实现。
+V4__create_documents.sql 已创建 biz.documents。现已有 Document 实体、DocumentStatus、DocumentRepository 和对象存储上传接口。
 
 字段：id、knowledge_base_id、filename、storage_key、size_bytes、content_hash、status、created_at、updated_at。
 
 - knowledge_base_id 外键指向知识库；不能上传到不存在的知识库。
-- filename 是展示名，storage_key 是相对存储标识；后续 Java 根据存储根目录定位文件。
+- filename 是展示名，storage_key 是 MinIO bucket 中的对象 Key；后续 Java 通过 MinIO 客户端访问文件。
 - content_hash 为文件内容 SHA-256；knowledge_base_id + content_hash 唯一，在同一知识库内去重，跨知识库允许相同文件。
 - size_bytes 以字节记录文件大小；非空文件由数据库约束保证，20MB 上限由上传接口配置检查。
 - status 初始 PENDING，处理时 PROCESSING，成功 READY，失败 FAILED。READY 表示后续 Python 已完成处理、可参与检索，不表示仅仅上传成功。
@@ -119,4 +119,57 @@ V4__create_documents.sql 已创建 biz.documents。现已有 Document 实体、D
 
 新增 3 项真实 PostgreSQL 测试：元数据保存读取与状态更新、同库查询及跨库重复内容、同库重复内容约束。全部 19 项测试通过，测试数据回滚。
 
-下一步实现本地文件存储、上传 Service 和带简短说明注释的上传接口。
+已在 deploy/compose.yaml 配置 Docker MinIO；MinIO 客户端、上传 Service 和上传接口已实现，启动与使用方式见下文。
+
+## 对象存储上传接口
+
+### 启动配置
+
+启用 `db,storage`，保留之前的 DB_URL、DB_USER、DB_PASSWORD，另外配置：
+
+| Java 环境变量 | 填写内容 |
+| --- | --- |
+| MINIO_ENDPOINT | http://localhost:19000 |
+| MINIO_ACCESS_KEY | deploy/.env 中 MINIO_ROOT_USER 的值 |
+| MINIO_SECRET_KEY | deploy/.env 中 MINIO_ROOT_PASSWORD 的值 |
+| MINIO_BUCKET | rag-documents |
+
+.env.example 只提供模板，Java 不会自动加载 deploy/.env。IDEA 在 Run Configuration 的 Active profiles 填入 db,storage，并设置这些环境变量。
+
+命令行在设置上述环境变量后运行：
+
+```powershell
+mvn spring-boot:run '-Dspring-boot.run.profiles=db,storage'
+```
+
+只启用 db 时知识库接口仍可用，但上传接口不注册，不要求提供对象存储配置。
+
+### 请求
+
+POST /api/knowledge-bases/{knowledgeBaseId}/documents，类型 multipart/form-data，字段名 file。
+
+Postman 的 Body 选择 form-data，添加 file 并将其类型改成 File，选择 .md 或 .pdf 文件。不要自行填写 multipart boundary，交由客户端生成。
+
+IDEA 可使用 requests/documents.http 和其中引用的 sample.md。先在 knowledge-bases.http 创建知识库，再填写实际 knowledgeBaseId。
+
+- 新上传返回 201 和 DocumentResponse。
+- 同知识库重复内容返回 200 和已有记录，即使文件名不同也不会新增对象。
+- 新记录状态 PENDING，本步不解析、不调用 Python、不生成向量。
+- 当前按扩展名接受 .md/.pdf，不进行完整文件格式解析；解析错误由后续 Python 处理。
+- 文件上限 20MB；整个 multipart 请求上限 21MB，为表单头预留空间。
+- Multipart 文件在 20MB 内保持内存缓冲，不由 Java 持久保存到本地 storage 文件夹；持久文件由 MinIO/Silo 管理。
+
+对象 Key 为 知识库UUID/随机UUID.md（或 .pdf），原始文件名仅用于展示。数据库写入失败时尝试移除刚上传的对象。普通重复请求会复用记录；数据库唯一约束仍负责阻止并发重复写入。
+
+### 阅读顺序
+
+1. MinioConfiguration：创建 SDK 客户端。
+2. DocumentController：接收 MultipartFile，调用 Service 并选择 201/200。
+3. DocumentService：检查知识库和文件，计算 SHA-256、查重、上传、保存记录。
+4. DocumentResponse：返回文档元数据，不暴露内部对象 Key。
+
+MinIO SDK 8.6.0 使用 OkHttp 5，pom.xml 显式引入 okhttp-jvm 5.1.0，提供 Maven 下的 JVM 实现。
+
+### 验证
+
+新增 2 项真实 PostgreSQL + 对象存储的上传测试，显式设置 MINIO_ACCESS_KEY 及相关配置后启用。它们验证上传、读回原内容、去重和错误参数；测试数据库写入回滚，对象存储中的测试文件在结束时清理。全部 21 项测试已通过。

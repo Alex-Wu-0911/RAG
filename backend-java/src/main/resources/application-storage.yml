@@ -1,0 +1,6 @@
+# 与 db 一起启用：--spring.profiles.active=db,storage
+storage:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:19000}
+  access-key: ${MINIO_ACCESS_KEY}
+  secret-key: ${MINIO_SECRET_KEY}
+  bucket: ${MINIO_BUCKET:rag-documents}

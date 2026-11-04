@@ -1,0 +1,13 @@
+@baseUrl = http://localhost:8080
+@knowledgeBaseId = 00000000-0000-0000-0000-000000000000
+
+### 上传：先创建知识库，将 id 填到上面；首次返回 201，再次上传同内容返回 200
+POST {{baseUrl}}/api/knowledge-bases/{{knowledgeBaseId}}/documents
+Content-Type: multipart/form-data; boundary=RagBoundary
+
+--RagBoundary
+Content-Disposition: form-data; name="file"; filename="sample.md"
+Content-Type: text/markdown
+
+< ./sample.md
+--RagBoundary--
