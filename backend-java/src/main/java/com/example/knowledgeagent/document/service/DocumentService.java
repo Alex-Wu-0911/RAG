@@ -2,6 +2,7 @@ package com.example.knowledgeagent.document.service;
 
 import com.example.knowledgeagent.common.error.BusinessException;
 import com.example.knowledgeagent.common.error.ErrorCode;
+import com.example.knowledgeagent.common.web.PageResponse;
 import com.example.knowledgeagent.document.dto.DocumentResponse;
 import com.example.knowledgeagent.document.entity.Document;
 import com.example.knowledgeagent.document.repository.DocumentRepository;
@@ -12,6 +13,8 @@ import io.minio.RemoveObjectArgs;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.OutputStream;
@@ -82,6 +85,26 @@ public class DocumentService {
             minio.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(storageKey).build());
             throw exception;
         }
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<DocumentResponse> list(UUID knowledgeBaseId, int page, int size) {
+        if (!knowledgeBases.existsById(knowledgeBaseId)) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        if (page < 0 || size < 1 || size > 100) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
+        return PageResponse.from(documents
+                .findByKnowledgeBaseIdOrderByCreatedAtDescIdDesc(knowledgeBaseId, PageRequest.of(page, size))
+                .map(DocumentResponse::from));
+    }
+
+    @Transactional(readOnly = true)
+    public DocumentResponse getById(UUID id) {
+        return documents.findById(id)
+                .map(DocumentResponse::from)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
     }
 
     public record UploadResult(DocumentResponse document, boolean created) {

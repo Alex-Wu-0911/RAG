@@ -27,6 +27,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
@@ -70,6 +71,20 @@ class DocumentUploadTest {
                             .file(new MockMultipartFile("file", "renamed.md", "text/markdown", content)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.id").value(documentId.toString()));
+            mvc.perform(get("/api/documents/{id}", documentId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(documentId.toString()))
+                    .andExpect(jsonPath("$.status").value("PENDING"));
+            mvc.perform(get("/api/knowledge-bases/{id}/documents", kbId).param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[0].id").value(documentId.toString()))
+                    .andExpect(jsonPath("$.page").value(0))
+                    .andExpect(jsonPath("$.size").value(1))
+                    .andExpect(jsonPath("$.total").value(1));
+            mvc.perform(get("/api/knowledge-bases/{id}/documents", kbId).param("page", "1").param("size", "1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items").isEmpty())
+                    .andExpect(jsonPath("$.total").value(1));
             assertThat(documents.findByKnowledgeBaseIdOrderByCreatedAtDescIdDesc(
                     kbId, org.springframework.data.domain.PageRequest.of(0, 20)).getTotalElements()).isEqualTo(1);
         } finally {
@@ -87,5 +102,22 @@ class DocumentUploadTest {
         mvc.perform(multipart("/api/knowledge-bases/{id}/documents", UUID.randomUUID())
                         .file(new MockMultipartFile("file", "notes.md", "text/markdown", new byte[]{1})))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void handlesEmptyListsInvalidPageAndMissingResources() throws Exception {
+        UUID kbId = knowledgeBases.saveAndFlush(new KnowledgeBase("空知识库", "")).getId();
+        mvc.perform(get("/api/knowledge-bases/{id}/documents", kbId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.total").value(0));
+        mvc.perform(get("/api/knowledge-bases/{id}/documents", kbId).param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        mvc.perform(get("/api/knowledge-bases/{id}/documents", UUID.randomUUID()))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/documents/{id}", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
 }

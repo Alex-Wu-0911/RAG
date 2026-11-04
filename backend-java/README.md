@@ -172,4 +172,19 @@ MinIO SDK 8.6.0 使用 OkHttp 5，pom.xml 显式引入 okhttp-jvm 5.1.0，提供
 
 ### 验证
 
-新增 2 项真实 PostgreSQL + 对象存储的上传测试，显式设置 MINIO_ACCESS_KEY 及相关配置后启用。它们验证上传、读回原内容、去重和错误参数；测试数据库写入回滚，对象存储中的测试文件在结束时清理。全部 21 项测试已通过。
+新增 2 项真实 PostgreSQL + 对象存储的上传测试，显式设置 MINIO_ACCESS_KEY 及相关配置后启用。它们验证上传、读回原内容、去重和错误参数；测试数据库写入回滚，对象存储中的测试文件在结束时清理。全部 22 项测试已通过。
+
+## 文档查询接口
+
+与上传相同，启用 db,storage。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | /api/knowledge-bases/{id}/documents?page=0&size=20 | 返回该知识库文档分页，size 范围 1～100 |
+| GET | /api/documents/{id} | 返回文档元数据及状态，不下载文件 |
+
+列表按创建时间与 ID 降序，知识库存在但没有文档时返回空 items、total=0。知识库或文档不存在时返回 404。Service 查询使用只读事务，不调用对象存储。
+
+requests/documents.http 已加入这两个请求，填写实际 knowledgeBaseId 和 documentId 后可执行。
+
+已用真实数据库与对象存储验证上传后列表/详情、重复上传、翻页、空列表和错误结果。全部 22 项测试通过。

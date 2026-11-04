@@ -1,4 +1,5 @@
 @baseUrl = http://localhost:8080
+@documentId = 00000000-0000-0000-0000-000000000000
 @knowledgeBaseId = 00000000-0000-0000-0000-000000000000
 
 ### 上传：先创建知识库，将 id 填到上面；首次返回 201，再次上传同内容返回 200
@@ -11,3 +12,9 @@ Content-Type: text/markdown
 
 < ./sample.md
 --RagBoundary--
+
+### 文档列表
+GET {{baseUrl}}/api/knowledge-bases/{{knowledgeBaseId}}/documents?page=0&size=20
+
+### 文档详情：将上传返回的 id 填入上面的 documentId
+GET {{baseUrl}}/api/documents/{{documentId}}
