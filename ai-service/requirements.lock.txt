@@ -27,6 +27,8 @@ openai==3.45.0
 opentelemetry-api==1.45.2
 orjson==3.13.0
 packaging==26.3
+psycopg==3.3.8
+psycopg-binary==3.3.8
 pycparser==3.12
 pycryptodome==4.3.0
 pydantic==2.14.2
@@ -41,6 +43,7 @@ tenacity==9.2.1
 truststore==0.10.5
 typing-inspection==0.4.5
 typing_extensions==4.16.0
+tzdata==2026.6
 urllib3==2.8.0
 uuid_utils==0.19.0
 uvicorn==0.54.0

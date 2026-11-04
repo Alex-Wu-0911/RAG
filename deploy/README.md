@@ -30,7 +30,7 @@ POSTGRES_DB、POSTGRES_USER、POSTGRES_PASSWORD 用于空数据卷的首次初�
 
 ## 当前边界
 
-采用 PostgreSQL 16 官方镜像。当前用户是镜像初始化的本地开发管理员；后续分离应用账号。pgvector 扩展和向量表留到 Python/RAG 阶段再安排，不假定当前镜像已包含扩展。
+采用 pgvector/pgvector:0.8.7-pg16-bookworm 镜像，在 PostgreSQL 16 上增加 pgvector 扩展。继续使用 postgres_data 数据卷。镜像包含扩展文件，但每个数据库还需要执行 CREATE EXTENSION 才能启用；具体操作见下文。
 
 下一步才将 Spring Boot 的 db profile 连接到此数据库。Compose 的 .env 不会自动成为 Java 进程的环境变量。
 
@@ -91,3 +91,21 @@ docker compose -f deploy/compose.yaml run --rm minio-init
 在 deploy 目录执行时省略 -f deploy/compose.yaml 即可。凭证、端口、bucket 和数据卷不变，无需删除现有卷。
 
 镜像资料：https://github.com/pgsty/silo
+
+## 启用 pgvector
+
+在项目根目录的 PowerShell 执行：
+
+```powershell
+docker compose -f deploy/compose.yaml pull postgres
+docker compose -f deploy/compose.yaml up -d --wait postgres
+docker compose -f deploy/compose.yaml exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /opt/rag/enable-pgvector.sql'
+```
+
+第二条命令会重建 PostgreSQL 容器，期间数据库短暂断开；原数据卷、业务表和连接端口继续使用，不要删除数据卷。
+
+最后一条执行本目录的 enable-pgvector.sql，应该返回扩展版本 0.8.7 和 dimensions = 3。脚本可以重复执行，适用于已经存在的数据库；不依赖只在空数据卷上运行的初始化脚本。
+
+当前只准备向量存储能力，还没有创建文本块表或写入 Embedding。后续再由 Python 保存文本块和对应向量。
+
+资料：https://github.com/pgvector/pgvector#docker

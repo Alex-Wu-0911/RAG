@@ -4,3 +4,4 @@ minio
 python-dotenv
 langchain-text-splitters
 openai
+psycopg[binary]

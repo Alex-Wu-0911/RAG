@@ -238,3 +238,38 @@ input 是一组片段，response.data 中每项 embedding 是一组浮点数。�
 已完成真实端到端验证：2 个片段获得 2 个 1536 维向量，接口返回 200。临时验证对象已清理。
 
 本步只生成向量，没有语义检索和聊天回答；/chat 仍明确标注为学习用的问题回显接口。下一步再将分块与向量存入数据库。
+
+## 第六步：Python 连接 PostgreSQL
+
+使用 psycopg 驱动，连接与 Java 相同的数据库。连接配置保存在本目录的 .env：
+
+```dotenv
+DB_HOST=localhost
+DB_PORT=15432
+DB_NAME=knowledge_agent
+DB_USER=rag
+DB_PASSWORD=与deploy/.env中的POSTGRES_PASSWORD一致
+```
+
+在 ai-service 目录运行只读检查：
+
+```powershell
+.\.venv\Scripts\python.exe database.py
+```
+
+脚本输出当前数据库、pgvector 版本，以及 biz.document_chunks 表是否存在。显示 not created 表示还需要使用 db,storage 配置重启 Spring Boot，让 Flyway 执行 V5 迁移；Python 不负责建表。
+
+后续代码通过 get_connection() 获得连接：
+
+```python
+from database import get_connection
+
+with get_connection() as connection:
+    result = connection.execute("SELECT current_database()").fetchone()
+```
+
+with 代码块退出后自动关闭连接；正常退出提交事务，出现异常则回滚。这一步没有连接池，也没有写入文档或向量。
+
+本次验证：连接 knowledge_agent 成功，pgvector 为 0.8.7；分块表尚未创建。依赖检查通过。
+
+驱动文档：https://www.psycopg.org/psycopg3/docs/basic/usage.html
