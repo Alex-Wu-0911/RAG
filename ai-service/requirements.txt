@@ -3,3 +3,4 @@ uvicorn
 minio
 python-dotenv
 langchain-text-splitters
+openai

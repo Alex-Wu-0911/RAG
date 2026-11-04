@@ -6,6 +6,8 @@ from minio.error import S3Error
 
 from storage import read_object
 from text_processing import split_text
+from embeddings import EMBEDDING_MODEL, embed_texts
+from openai import APIConnectionError, APIStatusError
 
 # 类似 Java 请求 DTO：定义字段类型，由框架解析并校验 JSON。
 class ChatRequest(BaseModel):
@@ -102,4 +104,39 @@ def preview_chunks(request: DocumentChunksRequest) -> DocumentChunksResponse:
         chunk_overlap=request.chunk_overlap,
         total=len(chunks),
         chunks=chunks,
+    )
+
+
+class DocumentEmbeddingsResponse(BaseModel):
+    storage_key: str
+    model: str
+    chunk_count: int
+    vector_count: int
+    dimensions: int
+    sample_vector: list[float]
+
+
+@app.post("/documents/embeddings", summary="调用真实 Embedding 模型生成文档片段向量")
+def preview_embeddings(request: DocumentReadRequest) -> DocumentEmbeddingsResponse:
+    """使用默认 500/50 分块，返回数量、维度及首个向量的前 8 个数值，不保存向量。"""
+    _, text = load_markdown(request.storage_key)
+    parts = split_text(text)
+    if not parts:
+        raise HTTPException(status_code=400, detail="文档没有可生成向量的文本")
+    try:
+        vectors = embed_texts(parts)
+    except APIStatusError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Embedding API 返回 {error.status_code}，请检查 Key、额度与模型权限",
+        ) from error
+    except APIConnectionError as error:
+        raise HTTPException(status_code=502, detail="无法连接 Embedding API") from error
+    return DocumentEmbeddingsResponse(
+        storage_key=request.storage_key,
+        model=EMBEDDING_MODEL,
+        chunk_count=len(parts),
+        vector_count=len(vectors),
+        dimensions=len(vectors[0]),
+        sample_vector=vectors[0][:8],
     )

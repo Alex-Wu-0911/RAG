@@ -1,12 +1,13 @@
 # RAG AI Service
 
-当前包含健康检查、问题回显、Markdown 读取和分块预览接口。已接对象存储和 LangChain 文本分割组件；尚未连接数据库、Embedding 或大模型。
+当前包含健康检查、问题回显、Markdown 读取、分块和真实 Embedding 预览接口。已接对象存储、LangChain 文本分割和 OpenAI Embedding；尚未连接向量数据库或实现生成式问答。
 
 ## 目录
 
 - main.py：应用、请求/响应模型及接口。
 - storage.py：对象存储 SDK 连接及读取。
 - text_processing.py：LangChain 文本分块函数。
+- embeddings.py：调用真实 OpenAI Embedding API。
 - .env：本地对象存储配置，已被 Git 忽略。
 - requirements.txt：项目直接依赖。
 - requirements.lock.txt：首次安装后的完整固定版本，便于复现。
@@ -186,3 +187,54 @@ main.py 的 load_markdown 复用已有读取与 UTF-8 解码逻辑，读取预�
 已验证真实对象读取后分块、默认与自定义参数、错误重叠参数、空文本处理，并确认原读取接口仍然可用。临时验证对象已清理。
 
 本接口返回全部分块，只用于当前学习预览，不保存分块，不调用模型，不生成或保存向量。下一步才接真实 Embedding 服务，届时再配置所选服务的 API Key。
+
+## 第五步：调用真实 Embedding API
+
+模型调用代码在 embeddings.py，不是一次性验证脚本。它使用官方 openai SDK；LangChain 当前负责文本分块。
+
+本地 .env 配置：
+
+```dotenv
+OPENAI_API_KEY=你的实际Key
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+.env 已被 Git 忽略，.env.example 只包含占位符。OpenAI SDK 从环境变量读取 Key；修改 .env 后重启服务。
+
+核心调用：
+
+```python
+response = client.embeddings.create(
+    model=EMBEDDING_MODEL,
+    input=texts[start:start + 128],
+)
+vectors.extend(item.embedding for item in response.data)
+```
+
+input 是一组片段，response.data 中每项 embedding 是一组浮点数。实现按每批最多 128 个片段请求，返回顺序与片段顺序一致。未启用模拟响应或自动重试。
+
+### 接口
+
+在 /docs 调用 POST /documents/embeddings：
+
+```json
+{
+  "storage_key": "知识库UUID/文件UUID.md"
+}
+```
+
+流程：从对象存储读取 Markdown → 用默认 500/50 参数分块 → 调用 embed_texts → 返回向量摘要。
+
+响应包含：
+
+- model：实际配置的模型名。
+- chunk_count：片段数量。
+- vector_count：返回的向量数量。
+- dimensions：单个向量的维度。
+- sample_vector：第一个向量的前 8 个数值，用于观察结果；完整向量存在本次函数的内存中，不写数据库。
+
+本步没有向量缓存，每次调用都真实请求 API 并产生对应 API 用量。空白文档没有片段时返回 400，不调用模型。模型服务报错或网络连接失败时返回 502，不用固定数值替代真实结果。
+
+已完成真实端到端验证：2 个片段获得 2 个 1536 维向量，接口返回 200。临时验证对象已清理。
+
+本步只生成向量，没有语义检索和聊天回答；/chat 仍明确标注为学习用的问题回显接口。下一步再将分块与向量存入数据库。
