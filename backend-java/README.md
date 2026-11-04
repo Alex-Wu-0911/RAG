@@ -20,7 +20,7 @@
 
 `mvn spring-boot:run -Dspring-boot.run.profiles=db`
 
-数据库表和 Flyway 迁移尚未实现，后续迁移文件放在 src/main/resources/db/migration。
+已有迁移 V1__create_users.sql，创建 biz.users；后续迁移文件放在 src/main/resources/db/migration。
 不要同时启用 local 和 db：local 会禁用数据库自动配置。
 
 ## 模块分工
@@ -84,5 +84,46 @@ try {
 - 启动日志显示激活 db profile，而非回退到 local。
 - Hikari 数据源成功建立 PostgreSQL 连接，Flyway 能读取数据库信息。
 - 应用启动成功，`GET http://localhost:8080/actuator/health` 返回 `UP`。db profile 下 Actuator 会检查数据库连接，公开响应仍不展示连接详情。
-- 当前没有业务迁移 SQL，Flyway 可能提示没有迁移，并创建 flyway_schema_history 元数据表；这不等于已经创建用户表。
-- 本任务不创建 User 实体、Repository 或用户表，下一步才实现。
+- 从任务 3 开始已有 V1 迁移：首次执行会创建 biz.users；再次启动仅校验，不重复执行。迁移历史表仍为 public.flyway_schema_history。
+- 任务 2 只验证连接；任务 3 创建用户表；User 实体和 Repository 留到任务 4。
+
+## 任务 3：第一份数据库迁移
+
+文件：src/main/resources/db/migration/V1__create_users.sql。
+
+- V1：版本号；双下划线之后是迁移描述，后缀为 .sql。
+- biz：业务 schema，可理解为数据库内的命名空间。
+- users：用户表，包含 id、username、password_hash、created_at。
+- PRIMARY KEY：用户唯一标识；UNIQUE：约束用户名不能重复；NOT NULL：字段必须有值。
+- 用户名暂按大小写区分，不允许空用户名或首尾空格。长度上限 50，后续注册 DTO 与之保持一致。
+- password_hash 只存哈希；数据库非空约束不能判断一个字符串是否真的经过哈希，后续业务层必须使用 PasswordEncoder。
+- TIMESTAMPTZ 保存时间点，查询显示取决于会话时区。
+- Flyway 成功执行 V1 后会记录版本和校验和，再次启动不会重新建表。
+
+已执行的 V1 不再修改；以后变更结构应新增 V2、V3 等迁移，不用 IF NOT EXISTS 掩盖用户表已经存在等结构问题。
+
+可在 IDEA 数据库控制台中查看（未连接数据库工具也不影响服务运行）：
+
+```sql
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'biz' AND table_name = 'users'
+ORDER BY ordinal_position;
+
+SELECT version, description, success
+FROM public.flyway_schema_history
+ORDER BY installed_rank;
+```
+
+本次验证：V1 成功执行，用户表四个字段、主键和用户名唯一约束存在；再次启动日志显示 No migration necessary。
+
+## 知识库阶段：V2 迁移
+
+V2__create_knowledge_bases.sql 已创建 biz.knowledge_bases，包含 id、owner_id、name、description、created_at、updated_at。
+
+- owner_id 外键指向 biz.users.id，创建知识库前必须有对应用户。开发用户的初始化留到接口阶段完成，不需要提前实现登录。
+- 同一用户可以创建同名知识库；名称上限 100 字符、描述上限 1000 字符；名称禁止空值及首尾空格。
+- owner_id、created_at DESC、id DESC 联合索引用于所有者的稳定分页。
+- updated_at 默认值只负责插入，后续更新由 Java 维护。
+- 本步没有增加知识库实体、Repository、接口或成员表，也没有修改 V1。
+- 本地数据库已成功执行 V2，表字段、外键及分页索引检查通过。已执行的 V2 不再修改，后续结构变更新增迁移。
