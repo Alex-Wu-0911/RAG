@@ -6,7 +6,7 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "请求格式或参数错误"),
     VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "参数校验失败"),
-    RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "资源不存在或不可访问"),
+    RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "资源不存在"),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "不支持此请求方法"),
     REQUEST_CONFLICT(HttpStatus.CONFLICT, "请求与当前资源状态冲突"),
     PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "上传内容超过大小限制"),
