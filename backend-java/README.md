@@ -231,4 +231,37 @@ biz.outbox_events 保存待投递事件，包含 task_id、topic、message_key�
 
 重启 Java 后，按 requests/document-tasks.http 提交、查询、重复提交，重复提交应返回相同任务 ID。下一步实现 Outbox 定时投递到 Kafka。
 
-新增集成测试覆盖提交查询、重复提交、4 路并发提交、事务回滚和结束后重新提交。当前自动验证被本机 javac 的 AccessDeniedException 阻断，测试尚未执行通过。
+新增集成测试覆盖提交查询、重复提交、4 路并发提交、事务回滚和结束后重新提交。权限问题解决后，这 5 项任务接口集成测试已通过，包含真实数据库的并发提交与事务回滚验证。
+## Kafka 异步文档处理：第 4 步，Outbox 投递
+
+引入 Spring Kafka，版本由 Spring Boot 管理。沿用 db,storage 启动配置即可，Kafka 默认连接 localhost:19092。环境变量 KAFKA_BOOTSTRAP_SERVERS 可修改地址，OUTBOX_PUBLISHER_ENABLED=false 可暂停后台投递。
+
+- OutboxPublisher 每轮结束后等待 2 秒，下一轮最多处理 10 条消息。
+- OutboxDispatchService 每条消息开启独立数据库事务。SELECT FOR UPDATE SKIP LOCKED 领取到期的 PENDING 消息，多个实例跳过已被锁定的记录。
+- Kafka Key 为 document_id，消息正文仍是 event_id/task_id/document_id JSON，文件留在 MinIO。
+- 等待 Kafka 确认后才写 SENT、sent_at，attempt_count 加 1；acks=all，开启生产者幂等。
+- 发送异常或确认超时则保留 PENDING，保存 last_error，attempt_count 加 1。重试等待 5、10、20、40、80、160、300 秒，之后保持 300 秒。
+- 一次等待确认最多 15 秒；获取元数据最多阻塞 5 秒。等待在后台线程进行，不阻塞提交接口。
+- 发送期间持有一条 Outbox 行锁。这种实现适合当前项目规模，会占用一个数据库连接；未做高吞吐性能验证。
+
+消息发出但写 SENT 前进程崩溃，重启后可能再次投递。生产者幂等不能消除这种跨数据库事务的重复发送，Python Worker 仍需基于任务领取和执行令牌实现幂等。当前尚未增加 Worker，所以任务仍保持 QUEUED，Outbox 的 SENT 只表示 Kafka 已确认接收。
+
+### 手动验证
+
+确认 Kafka 已启动、rag.document.process topic 已创建，然后刷新 Maven 依赖并重启 Java。已存在的 PENDING 消息会自动发送，不必重新提交任务。VS Code 运行日志应出现 Outbox sent。
+
+在项目根目录执行（任务 ID 使用之前提交的记录）：
+
+```powershell
+docker compose -f deploy/compose.yaml exec -T postgres psql -U rag -d knowledge_agent -c "SELECT id, task_id, status, attempt_count, sent_at, last_error FROM biz.outbox_events WHERE task_id = 'eeac38e7-5d67-452b-9629-afbe7db57e7f';"
+```
+
+成功时 status=SENT，sent_at 非空。确认消息正文：
+
+```powershell
+docker compose -f deploy/compose.yaml exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:29092 --topic rag.document.process --from-beginning --timeout-ms 10000
+```
+
+控制台应包含对应 task_id/document_id 的 JSON；无新消息等待超时后退出是正常现象。这个命令仅用于查看，不替代后续 Worker。
+
+测试环境已关闭定时投递，避免测试运行发送真实待处理消息。新增 3 项独立测试覆盖等待确认、确认失败退避及确认后数据库错误向外抛出；这些测试不连接真实 Kafka。权限问题解决后，本轮 Maven 验证 BUILD SUCCESS：共 30 项测试，27 项通过、3 项对象存储测试因未启用所需环境变量而跳过。Outbox 的 3 项独立测试及任务接口的 5 项真实数据库测试通过；尚未执行真实 Kafka 投递联调。

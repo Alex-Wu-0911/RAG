@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** 使用真实 PostgreSQL，覆盖并发提交及任务/Outbox 的事务原子性。 */
-@SpringBootTest
+@SpringBootTest(properties = "outbox.publisher.enabled=false")
 @AutoConfigureMockMvc
 @ActiveProfiles("db")
 @Import(DocumentTaskControllerTest.FaultConfiguration.class)
@@ -53,7 +53,7 @@ class DocumentTaskControllerTest {
     void prepare() {
         kbId = UUID.randomUUID();
         documentId = UUID.randomUUID();
-        outbox.fail = false;
+        outbox.setFailure(false);
         jdbc.sql("INSERT INTO biz.knowledge_bases (id, name) VALUES (:id, 'task integration test')")
                 .param("id", kbId).update();
         jdbc.sql("""
@@ -65,7 +65,7 @@ class DocumentTaskControllerTest {
 
     @AfterEach
     void cleanup() {
-        outbox.fail = false;
+        outbox.setFailure(false);
         jdbc.sql("DELETE FROM biz.outbox_events WHERE task_id IN (SELECT id FROM biz.document_processing_tasks WHERE document_id = :id)")
                 .param("id", documentId).update();
         jdbc.sql("DELETE FROM biz.document_processing_tasks WHERE document_id = :id").param("id", documentId).update();
@@ -133,8 +133,10 @@ class DocumentTaskControllerTest {
 
     @Test
     void rollsBackBothTaskAndEventWhenSubmissionFails() {
-        outbox.fail = true;
-        assertThatThrownBy(() -> service.submit(documentId)).isInstanceOf(IllegalStateException.class);
+        outbox.setFailure(true);
+        assertThatThrownBy(() -> service.submit(documentId))
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Intentional rollback test after outbox insert");
         assertThat(taskCount()).isZero();
         assertThat(jdbc.sql("SELECT count(*) FROM biz.outbox_events WHERE message_key = :id")
                 .param("id", documentId).query(Long.class).single()).isZero();
@@ -172,7 +174,11 @@ class DocumentTaskControllerTest {
     }
 
     static class FaultOutboxRepository extends OutboxRepository {
-        boolean fail;
+        private boolean fail;
+
+        public void setFailure(boolean fail) {
+            this.fail = fail;
+        }
 
         FaultOutboxRepository(JdbcClient jdbc) {
             super(jdbc);

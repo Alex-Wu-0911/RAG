@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** 使用真实 Service 和 PostgreSQL；测试请求产生的数据通过事务回滚。 */
-@SpringBootTest
+@SpringBootTest(properties = "outbox.publisher.enabled=false")
 @AutoConfigureMockMvc
 @ActiveProfiles("db")
 @Transactional
