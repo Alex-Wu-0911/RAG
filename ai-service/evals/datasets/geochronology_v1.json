@@ -1,0 +1,122 @@
+{
+  "dataset_id": "geochronology_v1",
+  "version": 1,
+  "source": {
+    "filename": "铷锶等时线定年_专业测试资料.md",
+    "document_id": "8e83782c-bf11-4ac7-9705-356813662bcd",
+    "content_hash": "055ca906414a4b3cadf0a69f5c099fad73b8cf690c88dd1f6553823abfe52a0f",
+    "chunk_count": 5
+  },
+  "cases": [
+    {
+      "id": "geo-001",
+      "category": "direct",
+      "question": "铷锶等时线定年资料中，QL-27 最终采用哪个样品组？批准记录号是什么？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [1],
+      "answerable": true,
+      "expected_points": ["采用矿物分离组 M-2", "批准记录号 QL27-R3"],
+      "forbidden_claims": ["最终采用 WR-1"],
+      "evidence_quotes": ["QL-27 的最终解释只使用矿物分离组 M-2，批准记录号为 QL27-R3"]
+    },
+    {
+      "id": "geo-002",
+      "category": "direct",
+      "question": "铷锶定年教学批次 QL-27 的最终报告年龄及初始 87Sr/86Sr 分别是多少？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [2],
+      "answerable": true,
+      "expected_points": ["最终报告年龄为 300.0 ± 5.7 Ma", "初始 87Sr/86Sr 为 0.70430"],
+      "forbidden_claims": ["将 0.70610 当作最终采用的初始比值"],
+      "evidence_quotes": ["QL-27 的最终报告值是 300.0 ± 5.7 Ma", "初始 87Sr/86Sr 为 0.70430"]
+    },
+    {
+      "id": "geo-003",
+      "category": "paraphrase",
+      "question": "那份铷锶岩石测年记录里，WR-1 的拟合离散指标更小，为什么反而淘汰它？是否为了让年龄符合预期？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [1, 3],
+      "answerable": true,
+      "expected_points": ["WR-1 有岩相学证据显示混合来源，同源或共同初始比值解释受到质疑", "不能只用更低的 MSWD 取代地质判断", "不是因年龄不合预期而排除"],
+      "forbidden_claims": ["仅因为 WR-1 年龄不符合预期而排除", "MSWD 更小即可证明样品同源"],
+      "evidence_quotes": ["全岩组 WR-1 因岩相学证据显示混合来源", "不是因为“年龄不合预期”而删除", "不能为所有数据集规定一个脱离自由度和误差口径的统一 MSWD 合格阈值"]
+    },
+    {
+      "id": "geo-004",
+      "category": "paraphrase",
+      "question": "在铷锶等时线图上，把横轴延伸到零时得到的截距 b，是年龄吗？能否由此认为初始没有 87Sr？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [0],
+      "answerable": true,
+      "expected_points": ["截距是初始 87Sr/86Sr，不是年龄", "不能据此认为初始不存在 87Sr，初始 87Sr 不能全计为后续放射成因产物"],
+      "forbidden_claims": ["截距 b 就是年龄", "初始 87Sr 必然为零"],
+      "evidence_quotes": ["截距 b 表示体系形成或最后一次同位素均一化时的初始锶同位素比，不是年龄"]
+    },
+    {
+      "id": "geo-005",
+      "category": "cross_chunk",
+      "question": "铷锶定年 QL-27 报告中的 ±5.7 Ma 是 95% 置信区间吗？计算包含衰变常数误差吗？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [1, 2],
+      "answerable": true,
+      "expected_points": ["±5.7 Ma 只传播了斜率的一倍标准不确定度", "不能直接当成 95% 置信区间", "不包含衰变常数不确定度及其他系统误差"],
+      "forbidden_claims": ["±5.7 Ma 是完整误差预算", "±5.7 Ma 已包含衰变常数误差", "直接认定为 95% 置信区间"],
+      "evidence_quotes": ["本文 σ 表示一倍标准不确定度，不应未经说明当成 95% 置信区间", "未包含衰变常数不确定度或其他系统误差", "±5.7 Ma 只表示斜率传播得到的一倍标准不确定度"]
+    },
+    {
+      "id": "geo-006",
+      "category": "cross_chunk",
+      "question": "保持 QL-27 的铷锶等时线斜率不变，把衰变常数换成 1.42 × 10^-11 a^-1，会得到什么年龄？它能替代原报告值吗？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [1, 2],
+      "answerable": true,
+      "expected_points": ["重算结果约 295.2 Ma", "原报告采用 1.3972 × 10^-11 a^-1，最终报告仍为 300.0 ± 5.7 Ma", "不能悄悄替代报告值，应说明采用的衰变常数口径"],
+      "forbidden_claims": ["295.2 Ma 是该批次最终批准报告值", "改变衰变常数不会改变年龄"],
+      "evidence_quotes": ["如果用旧常数 1.42 × 10^-11 a^-1 重算同一斜率，会得到约 295.2 Ma", "这不是本批次最终报告采用的年龄"]
+    },
+    {
+      "id": "geo-007",
+      "category": "false_premise",
+      "question": "铷锶定年 QL-27 中，WR-1 的 MSWD 更好，能不能用 WR-1 的斜率配上 M-2 的截距，拼出一个更可靠的等时线？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [2],
+      "answerable": true,
+      "expected_points": ["不能拼接不同拟合组的斜率和截距", "WR-1 与 M-2 来自不同拟合组，较低 MSWD 不构成拼接依据"],
+      "forbidden_claims": ["可以拼接并据此提高年龄可靠性"],
+      "evidence_quotes": ["禁止把 WR-1 的斜率与 M-2 的截距拼接计算，因为它们来自不同拟合组"]
+    },
+    {
+      "id": "geo-008",
+      "category": "missing_information",
+      "question": "铷锶定年教学批次 QL-27 使用了哪一款质谱仪？请给出具体型号和空白校正步骤。",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [3],
+      "answerable": false,
+      "expected_points": ["资料未提供仪器型号", "资料未提供空白校正流程，无法给出该批次具体实验步骤"],
+      "forbidden_claims": ["编造该批次的仪器厂商或型号", "把通用实验操作描述成 QL-27 实际采用的流程"],
+      "evidence_quotes": ["仪器型号或空白校正流程"]
+    },
+    {
+      "id": "geo-009",
+      "category": "missing_information",
+      "question": "请列出铷锶定年 QL-27 矿物组 M-2 六个分析点各自的原始 x、y 比值和误差相关系数，我想重新做回归。",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [2, 3],
+      "answerable": false,
+      "expected_points": ["资料没有各点原始 x/y 数据及误差相关系数", "仅有点数和拟合汇总，不能重建完整回归"],
+      "forbidden_claims": ["根据斜率和截距虚构六组实测数据", "声称已还原原始回归"],
+      "evidence_quotes": ["各分析点的 x/y 原始值、误差相关系数", "不能据此重建完整回归"]
+    },
+    {
+      "id": "geo-010",
+      "category": "missing_information",
+      "question": "铷锶定年资料中的 QL-27 矿物具体是哪一种？其封闭温度是多少摄氏度？",
+      "expected_knowledge_base_id": "2dc719cc-a15f-4f9b-9647-ffb80cc7f795",
+      "relevant_chunk_indices": [3],
+      "answerable": false,
+      "expected_points": ["资料未给出矿物具体名称", "无法确定具体矿物的封闭温度，不能仅凭年龄推断"],
+      "forbidden_claims": ["猜测矿物名称作为已知事实", "给出该样品未经记录的封闭温度数值"],
+      "evidence_quotes": ["矿物具体名称", "也不能判断具体哪种矿物具有多高的封闭温度"]
+    }
+  ]
+}
