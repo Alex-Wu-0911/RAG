@@ -440,3 +440,31 @@ Agent 的 source_id 使用“文档 UUID:分块序号”，回答中的 [source_
 LangChain 文档：https://docs.langchain.com/oss/python/langchain/agents
 
 本步已通过真实模型和数据库验证：知识库问题自主调用检索工具并引用真实片段；普通问候没有调用工具；空检索明确说明没有资料；参数校验正常。临时验证数据已清理。
+
+## 第十三步：列出知识库的工具（自动选库第 1 步）
+
+新增 knowledge_base_repository.py：find_all_knowledge_bases() 只读查询 biz.knowledge_bases 的 id、name、description，按名称和 ID 排序。
+
+agent_tools.py 新增 @tool 装饰的 list_knowledge_bases()，把数据库 UUID 转为字符串后返回。工具不需要参数，不调用 Embedding 或聊天模型，不修改数据库。
+
+在 ai-service 目录的 PowerShell 中手动验证：
+
+```powershell
+.\.venv\Scripts\python.exe -c "import json; from agent_tools import list_knowledge_bases; print(json.dumps(list_knowledge_bases.invoke({}), ensure_ascii=False, indent=2))"
+```
+
+预期返回知识库列表，每项包含 id、name 和 description。当前还没有把新工具注册进 Agent，也没有修改检索工具或 /agent/chat 请求格式；这些留到后续步骤。
+
+本步代码已生成；Codex 执行环境无法访问虚拟环境所依赖的基础 Python 安装，尚未完成运行验证，需要在 VS Code Terminal 执行以上命令确认结果。
+
+## 自动选库第 2 步：检索工具接收知识库 ID
+
+agent_tools.py 中新增顶层 search_knowledge_base 工具，参数为 knowledge_base_id、query 和 top_k。knowledge_base_id 是 UUID 类型；后续由模型根据 list_knowledge_bases 的真实结果选择，不能自行编造。
+
+本步只调整工具层。检索仍复用 embed_texts 和 search_chunks，不修改数据库结构和 SQL。create_search_tool 暂时保留，为现有 Agent 固定知识库并调用新工具，因此 /agent/chat 目前仍需要原来的知识库 ID 参数。后续再修改 Agent 注册和请求体。
+
+在 ai-service 目录验证（实际调用 Embedding API）：
+
+```powershell
+.\.venv\Scripts\python.exe -c "import json; from agent_tools import search_knowledge_base; result = search_knowledge_base.invoke({'knowledge_base_id':'2dc719cc-a15f-4f9b-9647-ffb80cc7f795','query':'QL-27 最终采用哪个样品组？','top_k':3}); print(json.dumps(result, ensure_ascii=False, indent=2))"
+```
