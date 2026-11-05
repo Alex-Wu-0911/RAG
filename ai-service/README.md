@@ -668,3 +668,42 @@ Remove-Item Env:RUN_DB_TESTS
 
 覆盖四路并发只有一位领取成功、次数和令牌正确提交、任务/文档 ID 错配、非 QUEUED 状态跳过。
 本步骤的 3 项真实 PostgreSQL 测试已全部通过。测试结束后已确认原有任务 eeac38e7-5d67-452b-9629-afbe7db57e7f 仍为 QUEUED，attempt_count=0。
+
+## Kafka Worker：第 3 步，执行文档处理与心跳续租
+
+新增 document_worker.py，kafka_consumer.py 默认仍是只预览模式，显式传 --process 才执行真实任务：
+
+```powershell
+# 在 ai-service 目录运行；会修改任务/文档状态、替换该文档分块，并调用付费 Embedding API。
+.\.venv\Scripts\python.exe -X utf8 kafka_consumer.py --process --once --timeout 15
+```
+
+收到一条消息后，正式消费组 rag-document-worker 领取任务，记录 RUNNING/READING；读取 MinIO 的 UTF-8 Markdown，依次更新 SPLITTING、EMBEDDING、SAVING，复用现有分块和真实 Embedding 函数。成功后任务是 SUCCEEDED/COMPLETED，文档是 READY；失败则任务和文档同时写 FAILED，任务保存 error_message 和 finished_at。当前仍不支持 PDF。
+
+TaskHeartbeat 在独立线程每 30 秒向 PostgreSQL 续租一次，将有效期延长至数据库当前时间后 120 秒。只允许当前 lease_token、RUNNING 且尚未到期的执行续租，不能复活过期执行。续租失败会阻止后续阶段和结果写入；已经发出的模型请求不能强制撤回，返回后仍会检查执行资格。
+
+complete_task 在同一数据库事务中锁定文档与任务、校验令牌及租约、替换向量、更新文档 READY 和任务 SUCCEEDED。入库过程中再次检查租约，过期则整个事务回滚；旧 Worker 也不能在成功后把任务改为失败。write_document_chunks 仅复用 SQL，不自行提交事务。
+
+为了避免旧同步入口与 Worker 互相覆盖，只要文档已有异步任务历史，旧 POST /documents/{id}/process 就返回 409。重新处理请提交新的 Java 任务。没有异步任务历史的文档仍可使用旧同步入口。
+
+Kafka 手动提交规则：
+
+- SUCCEEDED：结果与成功状态已提交，再提交 offset。
+- FAILED：失败原因已可靠保存，再提交 offset。当前不自动重试业务失败，重试通过 Java 创建新任务。
+- 已 SUCCEEDED/FAILED 的重复通知：跳过处理并提交 offset。
+- 正在执行、任务缺失/文档错配、租约丢失或数据库写入失败：不提交 offset，消费者退出，保留进度供排查及恢复。
+
+预览组与正式处理组隔离，预览消息不会推进正式消费进度。正式组没有进度时从最早保留消息开始，--once 处理最早的一条，不是按指定任务 ID 选消息。取消 --once 可持续运行，Ctrl+C 停止；单个消费者串行处理。
+
+max.poll.interval.ms 设置为 30 分钟：单次处理超过该时间可能导致分区重新分配和提交失败，不意味着支持无限长的任务。Worker 退出时，未正常结束的任务可能保持 RUNNING。租约到期后的自动重新入队、重新投递和恢复程序尚未实现；不会仅靠租约到期自动开始重试。
+
+本次已通过 26 项测试：包含 6 项真实 PostgreSQL 任务测试、4 项 Worker/消费进度测试及原有 16 项离线测试。数据库测试使用自建文档与固定测试向量，结束后清理，只用于验证事务和令牌，不代表模型检索效果；不调用真实 Embedding API。真实模型与 MinIO 的完整 Worker 联调待用户确认后执行。
+
+```powershell
+# 仅当前终端使用 IPv4，避免 localhost 的 IPv6 连接等待，不修改 .env。
+$env:DB_HOST = '127.0.0.1'
+$env:RUN_DB_TESTS = '1'
+.\.venv\Scripts\python.exe -X utf8 -m unittest discover -s evals -p 'test_*.py'
+Remove-Item Env:RUN_DB_TESTS
+Remove-Item Env:DB_HOST
+```

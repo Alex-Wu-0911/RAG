@@ -8,7 +8,7 @@ from storage import read_object
 from text_processing import split_text
 from embeddings import EMBEDDING_MODEL, embed_texts
 from openai import APIConnectionError, APIStatusError
-from document_repository import find_document, update_document_status
+from document_repository import DocumentBusyError, find_document, update_document_status
 from vector_store import save_document_chunks, search_chunks
 from generation import generate_answer
 from agent_service import run_agent
@@ -157,7 +157,10 @@ def process_document(document_id: UUID) -> DocumentProcessResponse:
     if document is None:
         raise HTTPException(status_code=404, detail="文档不存在")
 
-    update_document_status(document_id, "PROCESSING")
+    try:
+        update_document_status(document_id, "PROCESSING")
+    except DocumentBusyError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     try:
         _, text = load_markdown(document["storage_key"])
         chunks = split_text(text)
@@ -169,7 +172,10 @@ def process_document(document_id: UUID) -> DocumentProcessResponse:
         )
     except Exception as error:
         # 失败必须记录状态；仍将原错误交给框架处理，不返回虚假的成功结果。
-        update_document_status(document_id, "FAILED")
+        try:
+            update_document_status(document_id, "FAILED")
+        except DocumentBusyError as busy:
+            raise HTTPException(status_code=409, detail=str(busy)) from busy
         if isinstance(error, APIStatusError):
             raise HTTPException(
                 status_code=502,
