@@ -733,3 +733,33 @@ agent_service.py 新增 async stream_agent(question)，使用当前安装的 Lan
 ```
 
 下一步再增加 POST /agent/chat/stream，将这里的事件编码为 SSE；当前不能通过 curl 请求新路径。
+## Agent 流式输出：第 2 步，FastAPI SSE 接口
+
+新增 POST /agent/chat/stream。请求体与 /agent/chat 相同，{"question":"问题"}。响应 Content-Type 为 text/event-stream; charset=utf-8，每个 Python 事件编码为 event 行和单行 JSON data，最后以空行分隔。原有同步 /agent/chat 保留，不需要 Java 转发或新增中间件。
+
+agent_sse.py 负责事件编码、错误消息和断连清理；main.py 注册接口并设置 Cache-Control: no-cache、X-Accel-Buffering: no。响应生成器直接发送上游事件，不先收齐答案。
+
+- tool_start / tool_end：工具执行进展。
+- answer_delta：模型可见文本片段，按 message_id 区分模型调用；done.answer 为最终答案。
+- done：成功结束，包含完整答案、引用来源、调用记录和检索预算统计。
+- error：流内失败，包含 code 和简短 message；不向客户端返回原始异常或堆栈，之后关闭连接。
+
+请求参数错误在开始响应前返回 HTTP 422。流建立后响应头已发送，即使模型执行失败，HTTP 状态也通常仍是 200，所以客户端必须检查 done/error，不能只看 HTTP 状态码。收到部分文本后遇到 error，部分文本不表示完整成功答案。当前没有断线自动续传。
+
+客户端等待模型或工具时也会每 250 毫秒检查断连；断连会取消正在读取的异步任务并关闭上游事件流。响应写入失败或服务器取消响应时也清理生成器。已在线程池中发出的同步检索/API 请求不能保证立刻中断，不能将连接取消等同于已撤回所有付费调用。
+
+### 手动联调（会调用真实模型 API）
+
+重启 FastAPI，确认 http://127.0.0.1:8000/health 可访问。在 ai-service 目录执行：
+
+```powershell
+curl.exe -N -X POST "http://127.0.0.1:8000/agent/chat/stream" -H "Content-Type: application/json" --data-binary "@requests/agent-chat.json"
+```
+
+-N 关闭 curl 的输出缓冲；UTF-8 请求正文放在 JSON 文件里，避免 Windows PowerShell 的中文管道或 JSON 引号转义问题。应陆续看到 event: tool_start、tool_end、answer_delta，最后 done；实际工具顺序和片段数量由 Agent 执行决定，日常问候可能没有工具调用。Ctrl+C 可中断请求。不要用 Invoke-RestMethod 是否一次性显示来判断服务器是否流式。
+
+本轮没有运行真实模型联调，也没有花费模型 API 额度。新增 8 项 SSE 离线测试通过，覆盖事件编码、响应头、请求校验、错误清理、真实 ASGI 分块发送（首段先于执行完成）、等待期间断连以及写响应失败时的上游关闭。完整离线回归共 41 项：35 项通过，6 项数据库任务测试因未开启而跳过。
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m unittest evals.test_agent_sse -v
+```

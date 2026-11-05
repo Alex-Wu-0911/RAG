@@ -1,6 +1,7 @@
 ﻿from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from minio.error import S3Error
 
@@ -12,6 +13,7 @@ from document_repository import DocumentBusyError, find_document, update_documen
 from vector_store import save_document_chunks, search_chunks
 from generation import generate_answer
 from agent_service import run_agent
+from agent_sse import AgentStreamingResponse, agent_sse_events
 from reranking import RerankError
 from langchain.agents.middleware.tool_call_limit import ToolCallLimitExceededError
 from langgraph.errors import GraphRecursionError
@@ -307,6 +309,20 @@ def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail="Agent 没有生成完整回答，请重试") from error
     return AgentChatResponse(**result)
+
+
+@app.post(
+    "/agent/chat/stream", summary="流式返回 Agent 工具事件、回答片段和最终结果",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+)
+async def agent_chat_stream(request: AgentChatRequest, http_request: Request) -> StreamingResponse:
+    """POST 提交问题；SSE 逐条返回，done 表示成功结束，error 表示流内执行失败。"""
+    return AgentStreamingResponse(
+        agent_sse_events(http_request, request.question),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 
