@@ -486,3 +486,28 @@ agent_service.py 注册 list_knowledge_bases 和 search_knowledge_base 两个工
 旧的 create_search_tool 固定库封装已移除。接口是单轮执行，不保存追问历史；如果需要澄清，下一次请求应包含完整问题和主题。
 
 验证状态：已从正在运行的 FastAPI OpenAPI 确认 AgentChatRequest 仅含 question；实际模型自动选库结果待在 /docs 手动验证。预期 tool_calls 先出现 list_knowledge_bases，再出现带所选 knowledge_base_id 的 search_knowledge_base。
+
+## 知识库语义路由第 1 步：生成主题向量
+
+当前只准备主题向量，还没有替换 Agent 的 list_knowledge_bases 工具。
+
+新增 V6__add_knowledge_base_topic_embedding.sql，为 biz.knowledge_bases 添加可空的 topic_embedding vector(1536)。知识库主题向量与 document_chunks 中的文档片段向量分开保存。现有 Java 实体无需增加向量字段，仍可创建和查询知识库。
+
+操作顺序：
+
+1. 使用 db,storage 配置重新启动 Java，确认 Flyway 成功执行 V6。
+2. 在 ai-service 目录运行：
+
+```powershell
+.\.venv\Scripts\python.exe knowledge_base_embeddings.py
+```
+
+脚本使用“知识库名称＋简介”作为文本，复用 embed_texts 调用真实 Embedding API，并在一个事务内更新知识库主题向量。结束后查询并显示各库实际保存的向量维度，应为 1536。
+
+脚本可重复执行，每次都会重新生成现有知识库的主题向量，产生相应 Embedding 用量。当前新增库或修改名称、简介后，需要手动重跑，不会自动更新。更换 Embedding 模型前也需考虑向量维度和全部重建，不能混用不同模型的向量。
+
+目前简介仍沿用已有内容，因此主题匹配能力受简介质量限制。后续可完善简介覆盖的内容，再重建向量；不能保证一句笼统简介能代表整个知识库。
+
+这里批量读取名称和简介用于离线准备向量，不是每次用户提问时把全部知识库送进聊天模型。下一步才用问题向量搜索少量候选知识库。
+
+代码已生成；迁移执行与实际向量入库结果待按上述步骤验证。
