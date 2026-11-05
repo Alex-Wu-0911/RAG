@@ -529,3 +529,23 @@ agent_tools.py 新增 search_knowledge_bases(query, limit=3) 工具，复用 emb
 预期同位素地质年代学排名在 JVM 之前；实际分数由模型与已保存简介决定。查询调用真实 Embedding API，不更新主题向量、不调用聊天模型。
 
 本步暂未替换 Agent 的列表工具，待手动验证语义搜索后再接入。当前 SQL 使用精确向量距离排序；LIMIT 限制返回量，不等于计算时只比较这几个库。更大数据量下可以根据性能测量添加向量索引。
+
+## 知识库语义路由第 3 步：Agent 改用候选搜索
+
+当前 Agent 只注册 search_knowledge_bases 和 search_knowledge_base，不再提供 list_knowledge_bases。此前学习步骤中的全量列表工具已移除；find_all_knowledge_bases 仅由主题向量维护脚本使用。
+
+实际流程：问题 → search_knowledge_bases 生成查询向量并获取候选 → 模型根据名称、简介、相似度选择真实 ID → search_knowledge_base 检索文档片段 → 回答。
+
+/agent/chat 请求仍然只传 question：
+
+```json
+{
+  "question": "在铷锶等时线定年资料中，QL-27 为什么采用 M-2 而不采用 WR-1？"
+}
+```
+
+tool_calls 应先出现复数 search_knowledge_bases（搜索知识库），再出现单数 search_knowledge_base（检索某个库里的文档）。候选库只计入调用记录，sources 仍只包含文档片段。每次请求总工具调用上限仍为 4。
+
+目前不设置统一相似度阈值，模型需核对候选的名称、简介和检索原文；候选返回不保证问题可回答。当前仅限制候选数量，还没有实现整个 Agent 执行的累计上下文 token 预算。
+
+验证状态：先前语义工具已由用户实测，同位素地质年代学相似度约 0.626、JVM 约 0.081。此次注册修改后 /agent/chat 的接口定义仍可读取，仍只要求 question；模型完整调用链待在 /docs 手动验证。

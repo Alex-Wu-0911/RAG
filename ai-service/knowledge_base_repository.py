@@ -4,7 +4,7 @@ from database import get_connection
 
 
 def find_all_knowledge_bases() -> list[dict]:
-    """查询知识库 ID、名称和简介，供 Agent 判断应检索哪个库。"""
+    """查询知识库元数据，供主题向量维护脚本批量使用。"""
     with get_connection() as connection:
         with connection.cursor(row_factory=dict_row) as cursor:
             cursor.execute(
@@ -30,3 +30,4 @@ def find_similar_knowledge_bases(query_vector: list[float], limit: int = 3) -> l
                 (vector, vector, limit),
             )
             return cursor.fetchall()
+

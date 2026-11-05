@@ -273,7 +273,7 @@ class AgentChatResponse(BaseModel):
 
 @app.post("/agent/chat", summary="由 Agent 自动选择知识库并检索回答，返回实际工具调用记录")
 def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
-    """单轮 Agent 问答，只需问题；最多调用工具 4 次，含查询知识库列表。"""
+    """单轮 Agent 问答，只需问题；先语义搜索候选库，最多调用工具 4 次。"""
     try:
         result = run_agent(request.question)
     except (ToolCallLimitExceededError, GraphRecursionError) as error:
@@ -288,4 +288,5 @@ def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail="Agent 没有生成完整回答，请重试") from error
     return AgentChatResponse(**result)
+
 
