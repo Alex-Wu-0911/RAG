@@ -707,3 +707,29 @@ $env:RUN_DB_TESTS = '1'
 Remove-Item Env:RUN_DB_TESTS
 Remove-Item Env:DB_HOST
 ```
+## Agent 流式输出：第 1 步，Python 事件流
+
+agent_service.py 新增 async stream_agent(question)，使用当前安装的 LangChain astream_events(version="v2") 获取真实执行事件。这里只产生 Python 字典，尚未新增 HTTP 接口或 SSE 编码。run_agent 及原 /agent/chat 保留，两个入口共用 Agent 创建配置和最终结果汇总。
+
+| event | data | 含义 |
+| --- | --- | --- |
+| tool_start | id、name、args | Agent 开始执行一个工具 |
+| tool_end | id、name、args、status、result_count | 包装工具执行结束；同一个 id 与开始事件对应 |
+| answer_delta | message_id、text | 一段模型可见文本，message_id 为本次模型调用 run_id |
+| done | answer、tool_calls、sources、context_usage | 根 Agent 执行结束后的完整、权威结果 |
+
+保留原有每次请求独立的检索预算、去重、Cohere 重排、最多 4 次工具调用及递归上限。工具内部的原始检索调用不重复显示为外层工具事件，也不把候选库当作文档来源。
+
+模型流只提取文本块，不转发 reasoning、工具调用参数或其他原始模型事件。模型可能在调用工具前输出简短可见说明，因此不要将不同 message_id 的文本简单拼接后当作最终答案；done.answer 是最终完整回答，前面的 answer_delta 是过程中的可见文本。错误或不完整结果会抛出异常，不伪造 done；下一步由 SSE 层转换为 error 事件。
+
+流正常结束、调用方取消或显式 aclose 时关闭上游异步事件流。同步工具在线程池中已经发出的网络请求不保证能被强制中止；本步测试的是事件流关闭和取消传播，HTTP 客户端断连检测留给下一步。
+
+新增 evals/test_agent_stream.py 的 7 项离线测试已通过。其中使用本地测试模型运行真实 LangChain Agent 图，覆盖选库、检索、文本分段、嵌套工具过滤、最终来源和预算；另外检查推理/参数过滤、根状态选择、不完整结果、异常、提前关闭与取消。模型、数据库和重排调用在测试中被替换，不消耗付费 API。
+
+本轮全部离线测试：33 项中 27 项通过，6 项真实数据库任务测试按开关跳过。没有运行真实模型流式联调。
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m unittest evals.test_agent_stream -v
+```
+
+下一步再增加 POST /agent/chat/stream，将这里的事件编码为 SSE；当前不能通过 curl 请求新路径。

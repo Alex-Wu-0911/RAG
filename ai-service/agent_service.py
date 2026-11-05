@@ -1,9 +1,11 @@
 ﻿import json
 import os
+from contextlib import aclosing
+from collections.abc import AsyncIterator
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ToolCallLimitMiddleware
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from agent_tools import create_agent_tools
@@ -11,11 +13,12 @@ from retrieval_budget import RetrievalBudget
 from generation import CHAT_MODEL
 
 
-def run_agent(question: str) -> dict:
-    """让模型自主调用检索工具，返回回答、实际工具调用记录和参考片段。"""
+def _create_agent(streaming: bool = False):
+    """同步和流式执行使用相同配置，每次请求独立创建预算。"""
     budget = RetrievalBudget(max_tokens=int(os.getenv("AGENT_RETRIEVAL_TOKEN_BUDGET", "4000")), max_calls=4)
     model = ChatOpenAI(
         model=CHAT_MODEL,
+        streaming=streaming,
         use_responses_api=True,
         timeout=60,
         max_retries=0,
@@ -41,11 +44,10 @@ def run_agent(question: str) -> dict:
         ),
         middleware=[ToolCallLimitMiddleware(run_limit=4, exit_behavior="error")],
     )
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": question}]},
-        config={"recursion_limit": 20},
-    )
+    return agent, budget
 
+
+def _summarize_result(result: dict, budget: RetrievalBudget) -> dict:
     # 只收集实际工具调用及其结果，不返回模型内部推理。
     calls = {}
     sources = {}
@@ -78,6 +80,67 @@ def run_agent(question: str) -> dict:
         "sources": list(sources.values()),
         "context_usage": budget.usage(),
     }
+
+
+def run_agent(question: str) -> dict:
+    """让模型自主调用检索工具，返回回答、实际工具调用记录和参考片段。"""
+    agent, budget = _create_agent()
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": question}]},
+        config={"recursion_limit": 20},
+    )
+    return _summarize_result(result, budget)
+
+
+async def stream_agent(question: str) -> AsyncIterator[dict]:
+    """逐条产生 Python 事件；尚未编码为 SSE，执行异常交给调用方处理。"""
+    agent, budget = _create_agent(streaming=True)
+    final_result = None
+    tool_inputs = {}
+    events = agent.astream_events(
+        {"messages": [{"role": "user", "content": question}]},
+        config={"recursion_limit": 20},
+        version="v2",
+    )
+    # 结束、异常或取消时关闭上游事件流，不在后台继续读取模型响应。
+    async with aclosing(events):
+        async for event in events:
+            kind = event["event"]
+            data = event["data"]
+            name = event["name"]
+            run_id = str(event["run_id"])
+            if kind == "on_tool_start":
+                # 检索包装工具内部还会调用原始工具，只报告 Agent 直接调用的外层。
+                if any(str(parent) in tool_inputs for parent in event["parent_ids"]):
+                    continue
+                tool_inputs[run_id] = data["input"]
+                yield {"event": "tool_start", "data": {
+                    "id": run_id, "name": name, "args": data["input"],
+                }}
+            elif kind == "on_tool_end":
+                if run_id not in tool_inputs:
+                    continue
+                output = data["output"]
+                payload = json.loads(output.content if isinstance(output, ToolMessage) else output)
+                yield {"event": "tool_end", "data": {
+                    "id": run_id, "name": name, "args": tool_inputs.pop(run_id),
+                    "status": payload["status"], "result_count": len(payload["items"]),
+                }}
+            elif kind == "on_chat_model_stream":
+                if any(str(parent) in tool_inputs for parent in event["parent_ids"]):
+                    continue
+                chunk = data["chunk"]
+                if isinstance(chunk, AIMessageChunk) and chunk.text:
+                    # text 只提取文本块，跳过 reasoning 和工具调用参数块。
+                    yield {"event": "answer_delta", "data": {
+                        "message_id": run_id, "text": str(chunk.text),
+                    }}
+            elif kind == "on_chain_end" and not event["parent_ids"]:
+                # 只取根 Agent 的最终状态，不能误用内部节点的结束事件。
+                final_result = data["output"]
+    if final_result is None:
+        raise RuntimeError("Agent 事件流未返回最终结果")
+    yield {"event": "done", "data": _summarize_result(final_result, budget)}
 
 
 
