@@ -188,3 +188,47 @@ MinIO SDK 8.6.0 使用 OkHttp 5，pom.xml 显式引入 okhttp-jvm 5.1.0，提供
 requests/documents.http 已加入这两个请求，填写实际 knowledgeBaseId 和 documentId 后可执行。
 
 已用真实数据库与对象存储验证上传后列表/详情、重复上传、翻页、空列表和错误结果。全部 22 项测试通过。
+
+## Kafka 异步文档处理：第 2 步，任务表与 Outbox
+
+新增迁移 V7__create_document_tasks_and_outbox.sql，暂不增加实体类、接口、Kafka 生产者或 Python 消费者。
+
+biz.document_processing_tasks 保存一次处理任务：
+
+- document_id：处理哪个文档。
+- status：QUEUED 排队、RUNNING 执行中、SUCCEEDED 成功、FAILED 失败。
+- stage：QUEUED、READING、SPLITTING、EMBEDDING、SAVING、COMPLETED、FAILED，用于显示阶段，不计算虚假百分比。
+- attempt_count、error_message：实际执行次数和最近失败原因。
+- worker_id、lease_token、heartbeat_at、lease_expires_at：为任务领取、心跳和中断恢复准备；这些字段本身还没有实现恢复逻辑。
+- created_at、updated_at、started_at、finished_at：任务时间记录，updated_at 由应用维护。
+
+部分唯一索引限制同一文档最多一个 QUEUED/RUNNING 任务。任务结束后可以创建下一次任务。任务外键限制删除仍有任务记录的文档；文档删除功能后续需明确处理历史记录的策略。
+
+biz.outbox_events 保存待投递事件，包含 task_id、topic、message_key、payload、投递状态、尝试次数、下次尝试时间和错误。message_key 使用文档 ID，payload 只放任务/文档标识等，不存文件本体。PENDING 表示待投递，SENT 表示 Kafka 已确认接收，不能解释为 Python 已处理成功。
+
+任务执行次数与消息发送次数是两种不同的计数。同一个任务允许有多条 Outbox 事件，为后续重试和中断恢复重新通知预留；消费端仍需原子领取和幂等处理，不能只根据 Outbox 状态推断任务是否执行。
+
+后续提交接口会在一个数据库事务内创建任务及 Outbox 事件。此时即使 Kafka 暂时不可用，事件也不会仅留在 Java 内存里。发送成功但标记前崩溃仍可能重复投递，因此并不是端到端只执行一次。
+
+已在真实 PostgreSQL 的可回滚事务内验证建表 SQL、默认状态、活动任务唯一约束、失败后新任务、Outbox 插入及执行次数约束。验证结束已回滚全部表和测试数据；正式 V7 尚待 Flyway 执行。
+
+现在用现有 db,storage 配置重启 Spring Boot，日志应显示成功执行 V7。下一步再实现 Java 提交处理任务与任务查询接口。
+
+## Kafka 异步文档处理：第 3 步，提交与查询接口
+
+启用 `db` profile，并确保 Flyway 已执行 V7。可沿用现有 `db,storage` 启动配置。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | /api/documents/{documentId}/tasks | 无请求体，返回 202、任务信息和 Location 查询地址 |
+| GET | /api/document-tasks/{taskId} | 查询状态、阶段、实际执行次数和失败原因 |
+
+提交时先锁定文档行，在同一个数据库事务内创建 QUEUED 任务和 PENDING Outbox 事件。已有 QUEUED/RUNNING 任务时返回该任务，不再创建事件；原任务结束后可再次提交。文档或任务不存在返回 404，UUID 格式错误返回 400。
+
+这里使用 Spring JdbcClient 执行 SQL，事务仍由 Service 的 @Transactional 管理。Outbox payload 包含 event_id、task_id、document_id，Kafka Key 使用文档 ID。
+
+本步骤尚未实现 Kafka 投递和 Python Worker，所以提交后任务停留在 QUEUED、事件停留在 PENDING，attemptCount 为 0。这是已受理，不代表文件已完成处理；不会修改原有文档状态，也不调用 Python HTTP 接口。
+
+重启 Java 后，按 requests/document-tasks.http 提交、查询、重复提交，重复提交应返回相同任务 ID。下一步实现 Outbox 定时投递到 Kafka。
+
+新增集成测试覆盖提交查询、重复提交、4 路并发提交、事务回滚和结束后重新提交。当前自动验证被本机 javac 的 AccessDeniedException 阻断，测试尚未执行通过。

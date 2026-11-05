@@ -1,0 +1,12 @@
+@baseUrl = http://localhost:8080
+@documentId = 8e83782c-bf11-4ac7-9705-356813662bcd
+
+### 提交处理任务：无需请求体，返回 202；复制响应的 id 到下面的 taskId
+POST {{baseUrl}}/api/documents/{{documentId}}/tasks
+
+### 查询处理进度：将占位 UUID 替换为提交返回的任务 id
+@taskId = 00000000-0000-0000-0000-000000000000
+GET {{baseUrl}}/api/document-tasks/{{taskId}}
+
+### 重复提交同一文档：已有 QUEUED/RUNNING 任务时返回相同任务 id
+POST {{baseUrl}}/api/documents/{{documentId}}/tasks
