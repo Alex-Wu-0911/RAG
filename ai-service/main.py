@@ -259,15 +259,24 @@ class AgentSource(SearchHit):
     source_id: str
 
 
+class AgentContextUsage(BaseModel):
+    token_budget: int
+    used_tokens: int
+    duplicate_items_skipped: int
+    budget_exhausted: bool
+
+
 class AgentToolCall(BaseModel):
     name: str
     args: dict
     result_count: int
+    status: str
 
 
 class AgentChatResponse(BaseModel):
     answer: str
     tool_calls: list[AgentToolCall]
+    context_usage: AgentContextUsage
     sources: list[AgentSource]
 
 
@@ -288,5 +297,6 @@ def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail="Agent 没有生成完整回答，请重试") from error
     return AgentChatResponse(**result)
+
 
 

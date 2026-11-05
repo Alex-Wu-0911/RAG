@@ -1,12 +1,13 @@
 ﻿from typing import Annotated
 from uuid import UUID
 
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from embeddings import embed_texts
 from knowledge_base_repository import find_similar_knowledge_bases
 from vector_store import search_chunks
+from retrieval_budget import RetrievalBudget
 
 
 @tool
@@ -49,3 +50,33 @@ def search_knowledge_bases(
     knowledge_bases = find_similar_knowledge_bases(query_vector, limit)
     return [{**item, "id": str(item["id"])} for item in knowledge_bases]
 
+
+
+def create_agent_tools(budget: RetrievalBudget) -> list[BaseTool]:
+    """每个请求创建一组工具，候选库和文档片段共用预算与去重记录。"""
+    @tool("search_knowledge_bases")
+    def search_candidates(
+        query: Annotated[str, Field(min_length=1, max_length=4000)],
+        limit: Annotated[int, Field(ge=1, le=5)] = 3,
+    ) -> str:
+        """语义搜索候选知识库。返回 status 和 items；重复候选不再返回。"""
+        if budget.exhausted:
+            return budget.pack([], key="id")
+        items = search_knowledge_bases.invoke({"query": query, "limit": limit})
+        return budget.pack(items, key="id")
+
+    @tool("search_knowledge_base")
+    def search_documents(
+        knowledge_base_id: UUID,
+        query: Annotated[str, Field(min_length=1, max_length=4000)],
+        top_k: Annotated[int, Field(ge=1, le=20)] = 3,
+    ) -> str:
+        """使用候选中的真实 ID 检索原文，返回 status 和未发送过的完整片段 items。"""
+        if budget.exhausted:
+            return budget.pack([], key="source_id")
+        items = search_knowledge_base.invoke({
+            "knowledge_base_id": knowledge_base_id, "query": query, "top_k": top_k,
+        })
+        return budget.pack(items, key="source_id")
+
+    return [search_candidates, search_documents]

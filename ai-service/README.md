@@ -555,3 +555,43 @@ tool_calls 应先出现复数 search_knowledge_bases（搜索知识库），再�
 新增 evals/datasets/geochronology_v1.json 和 evals/README.md。数据集包含 10 条问题、目标知识库、相关分块、回答要点与不应编造的结论；当前只准备数据，不运行模型。标注基于现有地质文档与用户此前返回的分块，已核对原文哈希和证据摘录。
 
 下一步再增加逐条调用 /agent/chat 的执行脚本。只有 question 发给模型，其他字段用于评分。具体口径和限制见 evals/README.md。
+
+评测执行脚本已添加：在 ai-service 目录运行 `.\.venv\Scripts\python.exe evals/run_eval.py --limit 1` 可先测试一条；不带 --limit 则运行全部。结果保存在已忽略的 evals/results/独立运行目录，包含逐条 JSONL、统计汇总和人工审阅文档。运行前可执行 evals/test_run_eval.py 的离线测试；详细命令见 evals/README.md。本次尚未执行模型评测。
+
+## 第一次上下文优化：请求内去重与累计工具文本预算
+
+新增 retrieval_budget.py，并在每次 run_agent 调用时创建独立的 RetrievalBudget。Agent 使用 create_agent_tools 创建的包装工具，原来的独立检索工具仍可用于手动测试，返回格式保持列表。
+
+Agent 包装工具返回统一 JSON 文本：status 加 items。候选知识库按 id 去重，文档片段按 source_id（文档 ID:分块序号）去重。重复内容不再发给模型，但仍存在于本次请求之前的工具消息中；去重状态不跨用户请求共享。
+
+默认 AGENT_RETRIEVAL_TOKEN_BUDGET=4000，可在 .env 配置后重启服务。使用 tiktoken 的 o200k_base 编码统计实际工具 JSON 文本，包含条目元数据、状态和 JSON 格式。此口径不是整个模型上下文或 API 账单：不包含系统提示词、用户问题、工具定义、模型消息及协议封装，也不消除历史工具文本在后续模型轮次被再次读取的用量。
+
+工具调用次数仍由 ToolCallLimitMiddleware 限制为最多 4 次。预算计算为剩余调用预留空状态通知的空间，因此这些通知也计入文本预算。tiktoken 已在锁定依赖中，现也显式列为直接依赖；首次初始化编码缓存可能需要下载公开词表，不调用付费模型 API。
+
+按检索排序保留完整条目，不切断原文；首个超预算条目及其后续条目不发送。首次无法继续容纳条目后，标记预算耗尽，后续包装工具直接返回状态，不再请求 Embedding 或查询数据库。这样可能减少证据覆盖，应使用同一评测集确认质量变化，不能只看 token 降低。
+
+状态含义：
+
+- ok：本次返回了新资料。
+- no_results：检索没有结果。
+- no_new_results：有结果但都已返回过，应参考历史消息，不等于没有资料。
+- partial：只发送了部分条目，预算已不足，停止继续检索。
+- budget_exhausted：本次不再发送条目，使用已有资料回答或说明不足。
+
+/agent/chat 新增 context_usage：token_budget、used_tokens、duplicate_items_skipped、budget_exhausted。tool_calls 增加 status；result_count 现在表示实际发送给模型的新增条目数，不是数据库原始命中数。sources 仍只包含模型实际收到的文档片段，不包含被预算排除的片段。
+
+先运行不调用模型或数据库的测试：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s evals -p test_retrieval_budget.py
+```
+
+再复用同一用例做一次真实回归：
+
+```powershell
+.\.venv\Scripts\python.exe evals/run_eval.py --limit 1
+```
+
+查看 results.jsonl 中 response.context_usage，人工检查回答和引用。单次调用没有重复片段时，duplicate_items_skipped=0 是正常结果；需要多次检索出现重叠，才能观察去重效果。
+
+本次已从运行中的 OpenAPI 确认新增返回字段，7 项离线测试代码已添加。Codex 执行环境仍不能启动基础 Python，因此离线测试与优化后真实问答尚未运行；不存在已测出的速度或成本提升数据。
