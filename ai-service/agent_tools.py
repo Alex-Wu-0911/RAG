@@ -1,7 +1,7 @@
 ﻿from typing import Annotated
 from uuid import UUID
 
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import tool
 from pydantic import Field
 
 from embeddings import embed_texts
@@ -42,19 +42,3 @@ def search_knowledge_base(
         for hit in hits
     ]
 
-
-def create_search_tool(knowledge_base_id: UUID) -> BaseTool:
-    """暂时保留现有 Agent 的固定库入口，内部复用新的检索工具。"""
-    @tool("search_knowledge_base")
-    def search_current_knowledge_base(
-        query: Annotated[str, Field(min_length=1, max_length=4000)],
-        top_k: Annotated[int, Field(ge=1, le=20)] = 3,
-    ) -> list[dict]:
-        """检索当前知识库的相关原文，可更换关键词再次检索。"""
-        return search_knowledge_base.invoke({
-            "knowledge_base_id": knowledge_base_id,
-            "query": query,
-            "top_k": top_k,
-        })
-
-    return search_current_knowledge_base

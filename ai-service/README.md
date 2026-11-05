@@ -468,3 +468,21 @@ agent_tools.py 中新增顶层 search_knowledge_base 工具，参数为 knowledg
 ```powershell
 .\.venv\Scripts\python.exe -c "import json; from agent_tools import search_knowledge_base; result = search_knowledge_base.invoke({'knowledge_base_id':'2dc719cc-a15f-4f9b-9647-ffb80cc7f795','query':'QL-27 最终采用哪个样品组？','top_k':3}); print(json.dumps(result, ensure_ascii=False, indent=2))"
 ```
+
+## 自动选库第 3 步：注册工具并修改 Agent 接口
+
+当前 POST /agent/chat 只需要 question，不再需要 knowledge_base_id。原 POST /chat 仍保留指定知识库的基础 RAG 用法；前面学习步骤中的旧 /agent/chat 请求示例以本节为准。
+
+```json
+{
+  "question": "QL-27 最终采用哪个样品组？为什么不选 MSWD 更低的另一组？"
+}
+```
+
+agent_service.py 注册 list_knowledge_bases 和 search_knowledge_base 两个工具，run_agent 只接收问题。提示词要求知识库问题先查列表，再按名称与简介选择真实 ID 检索；无法确定主题时询问用户。当前是模型按提示词选择工具，没有使用代码硬编码“铷锶”等关键词路由。
+
+解析 ToolMessage 时，两个工具的结果都记录 result_count，但只有 search_knowledge_base 的片段写入 sources，避免把知识库列表当成引用。source_id 仍为“文档 UUID:分块序号”。单次请求最多调用工具 4 次，包含列表查询。普通问候可以不调用工具。
+
+旧的 create_search_tool 固定库封装已移除。接口是单轮执行，不保存追问历史；如果需要澄清，下一次请求应包含完整问题和主题。
+
+验证状态：已从正在运行的 FastAPI OpenAPI 确认 AgentChatRequest 仅含 question；实际模型自动选库结果待在 /docs 手动验证。预期 tool_calls 先出现 list_knowledge_bases，再出现带所选 knowledge_base_id 的 search_knowledge_base。

@@ -1,4 +1,4 @@
-from uuid import UUID
+﻿from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -252,7 +252,6 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 
 class AgentChatRequest(BaseModel):
-    knowledge_base_id: UUID
     question: str = Field(min_length=1, max_length=4000, description="交给 Agent 的问题")
 
 
@@ -272,11 +271,11 @@ class AgentChatResponse(BaseModel):
     sources: list[AgentSource]
 
 
-@app.post("/agent/chat", summary="由 Agent 自主调用检索工具并回答，返回实际工具调用记录")
+@app.post("/agent/chat", summary="由 Agent 自动选择知识库并检索回答，返回实际工具调用记录")
 def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
-    """单轮 Agent 问答，最多检索 3 次；工具调用记录可用于观察模型的选择。"""
+    """单轮 Agent 问答，只需问题；最多调用工具 4 次，含查询知识库列表。"""
     try:
-        result = run_agent(request.knowledge_base_id, request.question)
+        result = run_agent(request.question)
     except (ToolCallLimitExceededError, GraphRecursionError) as error:
         raise HTTPException(status_code=502, detail="Agent 达到执行次数上限，请缩小问题范围后重试") from error
     except APIStatusError as error:
@@ -289,3 +288,4 @@ def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail="Agent 没有生成完整回答，请重试") from error
     return AgentChatResponse(**result)
+
