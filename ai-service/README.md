@@ -511,3 +511,21 @@ agent_service.py 注册 list_knowledge_bases 和 search_knowledge_base 两个工
 这里批量读取名称和简介用于离线准备向量，不是每次用户提问时把全部知识库送进聊天模型。下一步才用问题向量搜索少量候选知识库。
 
 代码已生成；迁移执行与实际向量入库结果待按上述步骤验证。
+
+## 知识库语义路由第 2 步：搜索候选知识库
+
+knowledge_base_repository.py 新增 find_similar_knowledge_bases(query_vector, limit)，使用 pgvector 余弦距离查询 topic_embedding；NULL 向量不参与搜索。相似度为 1 - 余弦距离，结果按距离从小到大返回，同分时按 ID 排序。
+
+agent_tools.py 新增 search_knowledge_bases(query, limit=3) 工具，复用 embed_texts 生成查询向量，返回 id、name、description、similarity。limit 范围为 1 到 5。数据库里的完整向量不会返回给模型。
+
+当前还没有相似度阈值，因此返回的是相对最接近的候选，不保证每个结果都与问题相关；即使问题超出所有知识库的主题，也可能得到候选。需要继续核对简介和文档内容，不能把“有返回值”当成“资料足够”。
+
+先在 ai-service 目录单独验证：
+
+```powershell
+.\.venv\Scripts\python.exe -c "import json; from agent_tools import search_knowledge_bases; result = search_knowledge_bases.invoke({'query':'铷锶等时线定年和岩石年龄误差分析','limit':2}); print(json.dumps(result, ensure_ascii=False, indent=2))"
+```
+
+预期同位素地质年代学排名在 JVM 之前；实际分数由模型与已保存简介决定。查询调用真实 Embedding API，不更新主题向量、不调用聊天模型。
+
+本步暂未替换 Agent 的列表工具，待手动验证语义搜索后再接入。当前 SQL 使用精确向量距离排序；LIMIT 限制返回量，不等于计算时只比较这几个库。更大数据量下可以根据性能测量添加向量索引。

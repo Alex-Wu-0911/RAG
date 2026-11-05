@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 from pydantic import Field
 
 from embeddings import embed_texts
-from knowledge_base_repository import find_all_knowledge_bases
+from knowledge_base_repository import find_all_knowledge_bases, find_similar_knowledge_bases
 from vector_store import search_chunks
 
 
@@ -42,3 +42,18 @@ def search_knowledge_base(
         for hit in hits
     ]
 
+
+@tool
+def search_knowledge_bases(
+    query: Annotated[str, Field(min_length=1, max_length=4000)],
+    limit: Annotated[int, Field(ge=1, le=5)] = 3,
+) -> list[dict]:
+    """按问题的语义搜索候选知识库，返回真实 ID、名称、简介和相似度，不返回文档内容。
+
+    Args:
+        query: 用户问题或希望查找的主题。
+        limit: 最多返回的候选知识库数量，默认 3，上限 5。
+    """
+    query_vector = embed_texts([query])[0]
+    knowledge_bases = find_similar_knowledge_bases(query_vector, limit)
+    return [{**item, "id": str(item["id"])} for item in knowledge_bases]
