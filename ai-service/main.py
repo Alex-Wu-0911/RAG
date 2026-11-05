@@ -12,6 +12,7 @@ from document_repository import find_document, update_document_status
 from vector_store import save_document_chunks, search_chunks
 from generation import generate_answer
 from agent_service import run_agent
+from reranking import RerankError
 from langchain.agents.middleware.tool_call_limit import ToolCallLimitExceededError
 from langgraph.errors import GraphRecursionError
 
@@ -194,6 +195,7 @@ class SearchHit(BaseModel):
     chunk_index: int
     content: str
     similarity: float
+    rerank_score: float | None = None
 
 
 class SearchResponse(BaseModel):
@@ -285,6 +287,8 @@ def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     """单轮 Agent 问答，只需问题；先语义搜索候选库，最多调用工具 4 次。"""
     try:
         result = run_agent(request.question)
+    except RerankError as error:
+        raise HTTPException(status_code=502, detail="Cohere 重排调用失败，请检查额度、网络和模型权限") from error
     except (ToolCallLimitExceededError, GraphRecursionError) as error:
         raise HTTPException(status_code=502, detail="Agent 达到执行次数上限，请缩小问题范围后重试") from error
     except APIStatusError as error:
@@ -297,6 +301,7 @@ def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail="Agent 没有生成完整回答，请重试") from error
     return AgentChatResponse(**result)
+
 
 
 

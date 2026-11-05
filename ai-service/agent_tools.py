@@ -8,6 +8,7 @@ from embeddings import embed_texts
 from knowledge_base_repository import find_similar_knowledge_bases
 from vector_store import search_chunks
 from retrieval_budget import RetrievalBudget
+from reranking import RERANK_ENABLED, rerank_chunks
 
 
 @tool
@@ -21,10 +22,12 @@ def search_knowledge_base(
     Args:
         knowledge_base_id: 从语义搜索候选知识库中选择的真实 ID。
         query: 需要查找的问题或关键词。
-        top_k: 最多返回的片段数量，默认 3。
+        top_k: 重排后最多返回的片段数量，默认 3。
     """
     query_vector = embed_texts([query])[0]
-    hits = search_chunks(knowledge_base_id, query_vector, top_k)
+    candidate_count = max(20, top_k) if RERANK_ENABLED else top_k
+    hits = search_chunks(knowledge_base_id, query_vector, candidate_count)
+    hits = rerank_chunks(query, hits, top_k)
     return [
         {
             **hit,
@@ -80,3 +83,4 @@ def create_agent_tools(budget: RetrievalBudget) -> list[BaseTool]:
         return budget.pack(items, key="source_id")
 
     return [search_candidates, search_documents]
+

@@ -595,3 +595,32 @@ Agent 包装工具返回统一 JSON 文本：status 加 items。候选知识库�
 查看 results.jsonl 中 response.context_usage，人工检查回答和引用。单次调用没有重复片段时，duplicate_items_skipped=0 是正常结果；需要多次检索出现重叠，才能观察去重效果。
 
 本次已从运行中的 OpenAPI 确认新增返回字段，7 项离线测试代码已添加。Codex 执行环境仍不能启动基础 Python，因此离线测试与优化后真实问答尚未运行；不存在已测出的速度或成本提升数据。
+
+## Cohere API 重排（Agent 文档检索）
+
+新增 reranking.py，使用 langchain_cohere.CohereRerank 调用真实 Cohere Rerank API，不是让聊天模型模拟打分。Key 只写入本机已忽略的 .env，.env.example 只有占位符。
+
+```dotenv
+COHERE_API_KEY=你的CohereKey
+RERANK_MODEL=rerank-v5.0-fast
+RERANK_ENABLED=true
+```
+
+Agent 的 search_knowledge_base 工具在开启时先用 pgvector 最多召回 20 个候选（不足则返回实际数量），再让 Cohere 根据原问题排序，保留模型指定的 top_k 个，最后才进入现有去重与 token 预算。已有候选知识库的语义搜索不加重排；/chat 和独立 /knowledge-bases/{id}/search 仍使用原始向量检索。
+
+similarity 始终保留原始向量余弦相似度；rerank_score 是重排模型的相关性分数，二者不是同一个量表，也不是回答正确率。Document 的文档 ID、文件名、分块序号与原文在重排后保持对应关系，引用 source_id 不变。原始向量接口的 rerank_score 为 null。
+
+设置 RERANK_ENABLED=false 并重启或重新加载服务，可做纯向量检索对照。修改 .env 一般不会触发 Uvicorn 的 Python 文件重载，需要手动重启。开启时如果重排服务失败，/agent/chat 返回 502，不使用虚构分数或静默假装重排成功。Cohere Key 不会用于 OpenAI 调用。
+
+已安装并锁定 langchain-cohere 与 cohere 依赖，pip check 通过。已运行 16 项离线测试，覆盖重排元数据、关闭开关、空候选和 API 错误，以及原有预算和评测逻辑。
+
+真实调用验证：Agent 自动选库、Embedding、Cohere 重排和引用回答均成功，回答了 QL-27 采用 M-2、批准记录号 QL27-R3。
+
+质量限制：另一个询问仪器型号及空白校正的中文问题，关键的“未提供信息”片段未进入重排前 3 名；因此当前只能确认调用链正确，不能声称召回或回答质量已经提高。该问题以较多候选返回时仍可能取得该片段，需固定 top_k 并使用完整评测集对照。
+
+本次测试中发现 Windows PowerShell 管道会把脚本内中文转成问号，早期受影响的排序结果已排除。若用 here-string 管道向 Python 传脚本，先设置 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)，或把脚本保存为 UTF-8 文件再执行。
+
+试用 Key 的调用频率受服务限制；运行多轮 Agent 或批量评测时要留意 429。现有检索上下文预算只限制给聊天模型的工具结果，不限制发给 Cohere 的候选原文数量；这里通过最多 20 个候选控制单次重排规模。
+
+LangChain 组件：https://docs.langchain.com/oss/python/integrations/retrievers/cohere-reranker
+Cohere API：https://docs.cohere.com/reference/rerank
