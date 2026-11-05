@@ -1,6 +1,6 @@
-# 本地 PostgreSQL
+﻿# 本地基础设施
 
-本步骤只运行 PostgreSQL，不创建业务表、不修改 Java 配置。
+Docker Compose 管理 PostgreSQL（含 pgvector）、MinIO 和 Kafka。Java 与 FastAPI 仍在本机单独启动。
 
 ## 文件说明
 
@@ -109,3 +109,63 @@ docker compose -f deploy/compose.yaml exec -T postgres sh -c 'psql -v ON_ERROR_S
 当前只准备向量存储能力，还没有创建文本块表或写入 Embedding。后续再由 Python 保存文本块和对应向量。
 
 资料：https://github.com/pgvector/pgvector#docker
+## Kafka：异步文档处理第 1 步
+
+采用官方 apache/kafka:4.4.0 JVM 镜像并固定已验证的镜像摘要。单节点 KRaft，broker 和 controller 在同一容器内，不需要 ZooKeeper。此配置用于本地开发，单副本不提供节点级高可用。
+
+### 地址和数据
+
+- 本机 Java/Python 使用 localhost:19092。
+- Compose 内其他容器使用 kafka:29092。
+- 9092 是 Kafka 容器内的外部监听端口，映射到本机 19092；controller 的 29093 不暴露到本机。
+- 可用 deploy/.env 中的 KAFKA_PORT 修改本机端口，默认值已在 Compose 中提供，不必新增真实 .env 项也能启动。
+- kafka_data 命名卷保存消息日志和 KRaft 元数据；重建容器继续使用原卷。CLUSTER_ID 与该卷保持一致，不要随意修改。
+
+### 启动并创建 Topic
+
+在项目根目录执行：
+
+```powershell
+docker compose -f deploy/compose.yaml up -d --wait kafka
+docker compose -f deploy/compose.yaml run --rm kafka-init
+docker compose -f deploy/compose.yaml ps
+```
+
+kafka 应显示 healthy。kafka-init 等待 broker 健康，然后创建 rag.document.process；采用 1 个分区、1 个副本，先供单 Worker 顺序处理。重复运行初始化不会清空 Topic。kafka-init 正常完成后退出。
+
+查看 Topic：
+
+```powershell
+docker compose -f deploy/compose.yaml exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --describe --topic rag.document.process
+```
+
+预期包含 PartitionCount: 1、ReplicationFactor: 1，以及已选出的 Leader。
+
+### 验证真实消息收发
+
+在项目根目录执行：
+
+```powershell
+.\deploy\test-kafka.ps1
+```
+
+脚本创建名称带随机编号的临时 rag.smoke.* Topic，用 console producer 发送一条唯一的 ASCII 测试消息，再用 console consumer 读取并核对，最后删除自己创建的临时 Topic。成功输出 PASS: produced and consumed ...。这只验证 Kafka 基础消息收发，不会生成 Embedding 或更改文档状态。
+
+### 常用检查
+
+```powershell
+docker compose -f deploy/compose.yaml logs --tail 80 kafka
+Test-NetConnection localhost -Port 19092
+```
+
+如果端口冲突或被 Windows 保留，修改 KAFKA_PORT 后重新创建 Kafka；本机客户端连接端口也要一起更新。TCP 检查只表示端口可连接，不能代替 Kafka 消息收发验证。
+
+### 当前进度
+
+本步只添加 Kafka、Topic 初始化和烟雾测试脚本。下一步再增加任务表和 Outbox 表；Java 生产者与 Python 消费者尚未接入。
+
+已验证：官方镜像标签和摘要在 Docker Hub Registry 可访问、Compose 解析与监听地址配置、原 PostgreSQL/MinIO 服务保留，以及 PowerShell 验证脚本语法。
+
+待验证：实际容器启动、Topic 创建和真实收发。Codex 命令环境无法访问 Docker 引擎命名管道，因此需要在 VS Code Terminal 执行上述命令，不能把配置校验当成运行成功。
+
+官方资料：https://kafka.apache.org/44/getting-started/docker/
