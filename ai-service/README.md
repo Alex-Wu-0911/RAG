@@ -624,3 +624,47 @@ similarity 始终保留原始向量余弦相似度；rerank_score 是重排模�
 
 LangChain 组件：https://docs.langchain.com/oss/python/integrations/retrievers/cohere-reranker
 Cohere API：https://docs.cohere.com/reference/rerank
+
+## Kafka 消费者：第 1 步，验证接收通知
+
+新增 kafka_consumer.py，使用 confluent-kafka。它只读取并打印 event_id、task_id、document_id 和 Kafka 分区/offset，不访问数据库、MinIO 或模型 API，不执行文档处理。
+
+在 ai-service 目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 kafka_consumer.py
+```
+
+持续监听，Ctrl+C 停止。单条验证可用：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 kafka_consumer.py --once --timeout 15
+```
+
+先确认 Docker Kafka 在运行，然后重启含最新 Outbox 投递逻辑的 Java 服务。已有 PENDING 消息会自动发送；Java 日志应出现 Outbox sent。此后消费者打印对应任务 ID。单条模式若等待 15 秒未收到消息，退出码为 1；不等同于连接一定失败，Topic 为空也会超时。
+
+默认连接 localhost:19092、Topic rag.document.process。配置示例在 .env.example；未设置时使用这些默认值即可。Docker 开发端口绑定 IPv4，消费者显式使用 broker.address.family=v4，避免 localhost 被优先解析成 ::1。
+
+这是预览消费者：独立消费组 rag-document-preview，auto.offset.reset=earliest，关闭自动提交和自动存储 offset，代码也不主动提交。没有已提交进度时，重启会再次读取保留的消息，这是本步骤用于重复验证的预期行为。后续正式 Worker 使用独立消费组，并在任务状态妥善保存后提交进度。
+
+已安装 confluent-kafka 2.16.1 并更新锁定依赖，pip check 通过。实际连接检查确认 Topic 存在，分区 0 的 offset 范围为 (0,0)，当时没有可读取消息；尚未完成 Java 投递到 Python 打印的真实消息联调。
+## Kafka Worker：第 2 步，原子领取任务
+
+新增 task_repository.claim_task(task_id, document_id, worker_id)。用一条 UPDATE ... WHERE status='QUEUED' RETURNING 完成状态检查和更新，避免先 SELECT 再 UPDATE 的并发重复领取。额外匹配 document_id，不能用错配的文档通知领取任务。
+
+领取成功时返回字典，包含 RUNNING/READING 状态、执行次数、Worker 标识和本次执行令牌 lease_token；未领取到返回 None。事务正常提交后函数才返回；重复消息、已在执行或已结束的任务不会再次领取。执行次数只在成功领取时增加。
+
+当前同时写入心跳时间及 120 秒租约到期时间，为后续 Worker 心跳及失联恢复预留。此时尚未实现续租、过期任务恢复及令牌校验的结果提交，不能仅靠时间到期自动恢复任务，也不会领取已经 RUNNING 的过期任务。
+
+本步骤只实现数据库方法，kafka_consumer.py 仍保持只打印模式。正式调用领取逻辑要与文档执行、结束状态更新一起接入，避免真实任务被领取后一直停在 RUNNING。
+
+真实数据库测试只创建并清理独立测试记录，不创建 Outbox，不处理原有文档，不调用模型 API。运行：
+
+```powershell
+$env:RUN_DB_TESTS = '1'
+.\.venv\Scripts\python.exe -X utf8 -m unittest evals.test_task_repository -v
+Remove-Item Env:RUN_DB_TESTS
+```
+
+覆盖四路并发只有一位领取成功、次数和令牌正确提交、任务/文档 ID 错配、非 QUEUED 状态跳过。
+本步骤的 3 项真实 PostgreSQL 测试已全部通过。测试结束后已确认原有任务 eeac38e7-5d67-452b-9629-afbe7db57e7f 仍为 QUEUED，attempt_count=0。
