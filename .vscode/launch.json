@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Current File",
+            "request": "launch",
+            "mainClass": "${file}"
+        },
+        {
+            "type": "java",
+            "name": "KnowledgeAgentApplication",
+            "request": "launch",
+            "mainClass": "com.example.knowledgeagent.KnowledgeAgentApplication",
+            "projectName": "knowledge-agent-backend",
+            "args": "--spring.profiles.active=db,storage",
+            "envFile": "${workspaceFolder}/ai-service/.env"
+        }
+    ]
+}
